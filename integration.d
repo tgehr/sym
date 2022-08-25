@@ -59,19 +59,19 @@ private DExpr definiteIntegralImpl(DExpr expr,DExpr facts=one){
 	}
 	if(auto r=discDeltaSubstitution())
 		return r;
-	DExpr deltaSubstitution(){
+	DExpr oldDeltaSubstitution(){
 		// TODO: detect when to give up early?
 		foreach(f;expr.factors){
 			if(!f.hasFreeVar(var)) continue;
-			if(auto d=cast(DDelta)f){
-				if(auto r=DDelta.performSubstitution(d,expr.withoutFactor(f)))
+			if(auto d=cast(DDeltaOld)f){
+				if(auto r=DDeltaOld.performSubstitution(d,expr.withoutFactor(f)))
 					return r.simplify(facts);
 			}
 		}
 		return null;
 	}
-	if(auto r=deltaSubstitution()) return r;
-	foreach(T;Seq!(DDiscDelta,DDelta,DIvr)){ // TODO: need to split on DIvr?
+	if(auto r=oldDeltaSubstitution()) return r;
+	foreach(T;Seq!(DDiscDelta,DDeltaOld,DIvr)){ // TODO: need to split on DIvr?
 		foreach(f;expr.factors){
 			if(auto p=cast(DPlus)f){
 				bool check(){
@@ -104,7 +104,7 @@ private DExpr definiteIntegralImpl(DExpr expr,DExpr facts=one){
 			}
 		}
 	}
-	nexpr=expr.linearizeConstraints!(x=>!!cast(DDelta)x)(var).simplify(facts.incDeBruijnVar(1,0).simplify(one)); // TODO: only linearize the first feasible delta.
+	nexpr=expr.linearizeConstraints!(x=>!!cast(DDeltaOld)x)(var).simplify(facts.incDeBruijnVar(1,0).simplify(one)); // TODO: only linearize the first feasible delta.
 	if(nexpr != expr) return definiteIntegral(nexpr,facts);
 	/+if(auto r=deltaSubstitution(true))
 	 return r;+/
@@ -528,7 +528,7 @@ Q!(SplitIvrsIntegral,DExpr[2]) splitIvrsIntegral(DExpr expr){
 
 private DExpr tryIntegrateImpl(DExpr expr){
 	auto var=db1;
-	assert(expr.factors.all!(x=>!cast(DDelta)x));
+	assert(expr.factors.all!(x=>!cast(DDeltaOld)x));
 	auto lexpr=expr.linearizeConstraints(var).simplify(one);
 	if(lexpr != expr) return tryIntegrate(lexpr);
 	auto ivrsNonIvrs=splitIvrsIntegral(expr);
