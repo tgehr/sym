@@ -271,7 +271,7 @@ mixin template Visitors(){
 		static if(is(typeof(this):DAssocOp)||is(typeof(this):DCommutAssocOp))
 			assert(args[0].length>1);
 		static if(is(typeof(this)==DIvr)){
-			foreach(d;args[1].allOf!DDelta) assert(0,text(args[1]));
+			foreach(d;args[1].allOf!DDiscDelta) assert(0,text(args[1]));
 		}
 	}do{
 		subExprs=args;
@@ -282,7 +282,7 @@ mixin template Visitors(){
 	override int forEachSubExpr(scope int delegate(DExpr) dg){
 		// TODO: fix this.
 		import dp: DDPDist;
-		static if(!(is(typeof(this)==DDPDist)||is(typeof(this)==DLambda)||is(typeof(this)==DDistLambda)||is(typeof(this)==DInt)||is(typeof(this)==DSum)||is(typeof(this)==DLim)||is(typeof(this)==DDiff)||is(typeof(this)==DDelta)||is(typeof(this)==DDiscDelta)))
+		static if(!(is(typeof(this)==DDPDist)||is(typeof(this)==DLambda)||is(typeof(this)==DDistLambda)||is(typeof(this)==DInt)||is(typeof(this)==DSum)||is(typeof(this)==DLim)||is(typeof(this)==DDiff)||is(typeof(this)==DDeltaOld)||is(typeof(this)==DDiscDelta)))
 			mixin(forEachSubExprImpl!"if(auto r=dg(x)) return r;");
 		return 0;
 	}
@@ -396,13 +396,17 @@ mixin template FactoryFunction(T){
 		DExpr dGt(DExpr e1,DExpr e2){ return dLtZ(e2-e1); }
 	}else:
 
-	static if(is(T==DDelta)){
+	static if(is(T==DDiscDelta)){
 		import ast.expression; // TODO: remove this import
-		DExpr dDelta(DExpr e,DExpr var,Expression ty){ // TODO: dexpr shouldn't know about expression/type, but this is most convenient for overloading
+		DExpr dDelta(DExpr e,DExpr var,Expression ty){ // TODO: dexpr shouldn't know about expression/type, but this is most convenient for overloading; TODO: get rid of this
 			import ast.type;
-			if(isSubtype(ty,ℝ(true))) return dDelta(e-var);
+			if(isSubtype(ty,ℝ(true))) return dDeltaOld(e-var); // TODO: get rid of this
 			assert(cast(TupleTy)ty||cast(VectorTy)ty||cast(ArrayTy)ty||cast(AggregateTy)ty||cast(ContextTy)ty||cast(FunTy)ty||cast(TypeTy)ty||cast(Identifier)ty||cast(CallExp)ty,text(ty)); // TODO: add more supported types
 			return dDiscDelta(e,var);
+		}
+		DExpr dDelta(DExpr e,DExpr var){
+			//return dDiscDelta(e,var);
+			return dDeltaOld(e-var); // TODO: get rid of this
 		}
 	}else static if(is(T==DInt)){ // TODO: generalize over DInt, DSum, DLim, DLambda, (DDiff)
 		@disable DExpr dIntSmp(DVar var,DExpr expr);
@@ -1359,8 +1363,8 @@ class DMult: DCommutAssocOp{
 			/+// TODO: do we want auto-distribution?
 			if(cast(DPlus)e1) return dDistributeMult(e1,e2);
 			if(cast(DPlus)e2) return dDistributeMult(e2,e1);+/
-			if(cast(DPlus)e1&&e1.hasAny!DDelta&&!e2.hasAny!DDelta) return dDistributeMult(e1,e2);
-			if(cast(DPlus)e2&&e2.hasAny!DDelta&&!e1.hasAny!DDelta) return dDistributeMult(e2,e1);
+			if(cast(DPlus)e1&&e1.hasAny!DDeltaOld&&!e2.hasAny!DDeltaOld) return dDistributeMult(e1,e2);
+			if(cast(DPlus)e2&&e2.hasAny!DDeltaOld&&!e1.hasAny!DDeltaOld) return dDistributeMult(e2,e1);
 			// TODO: refine condition
 			// TODO: use faster polynomial multiplication if possible?
 			// (for example, only expand polynomial products in a sum of polynomials)
@@ -1403,7 +1407,7 @@ class DMult: DCommutAssocOp{
 			if(var&&wo.hasFreeVar(var) && !d.e.hasFreeVar(var))
 				return (wo.substitute(var,d.e)*d).simplify(facts);
 		}
-	Louter: foreach(f;this.factors) if(auto d=cast(DDelta)f){
+	Louter: foreach(f;this.factors) if(auto d=cast(DDeltaOld)f){
 			auto fact=dEqZ(d.var).simplify(facts);
 			foreach(f;fact.factors) if(!cast(DIvr)f) continue Louter; // TODO: remove this if possible
 			facts=facts*fact;
@@ -2036,12 +2040,12 @@ DExpr cancelFractions(bool isDelta)(DExpr e,DIvr.Type type=DIvr.Type.eqZ){
 			if(!util.among(type,eqZ,neqZ))
 				cancel=dAbs(cancel).simplify(one);
 	if(cancel!=one){
-		static if(isDelta) return dDelta(dDistributeMult(e,cancel))*dAbs(cancel);
+		static if(isDelta) return dDeltaOld(dDistributeMult(e,cancel))*dAbs(cancel);
 		else return dIvr(type,dDistributeMult(e,cancel));
 	}
 	auto nege=(-e).simplify(one);
 	if(!simple&&(util.among(type,DIvr.Type.eqZ,DIvr.Type.neqZ))&&(e.getFractionalFactor().c<0||nege.getFractionalFactor().c>=0&&nege.isMoreCanonicalThan(e))){
-		static if(isDelta) return dDelta(nege);
+		static if(isDelta) return dDeltaOld(nege);
 		else return dIvr(type,nege);
 	}
 	return null;
@@ -2222,15 +2226,15 @@ DExpr linearizeConstraints(alias filter=e=>true)(DExpr e,DVar var){ // TODO: don
 		return linearizeConstraints(p.operands[0],var)^^linearizeConstraints!filter(p.operands[1],var);
 	}
 	if(auto ivr=cast(DIvr)e) if(filter(ivr)) return linearizeConstraint(ivr,var);
-	if(auto delta=cast(DDelta)e) if(filter(delta)) return linearizeConstraint(delta,var);
+	if(auto delta=cast(DDeltaOld)e) if(filter(delta)) return linearizeConstraint(delta,var);
 	return e; // TODO: enough?
 }
 
-DExpr linearizeConstraint(T)(T cond,DVar var) if(is(T==DIvr)||is(T==DDelta))
+DExpr linearizeConstraint(T)(T cond,DVar var) if(is(T==DIvr)||is(T==DDeltaOld))
 in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,leZ));}do{
 	alias Type=DIvr.Type;
 	alias eqZ=Type.eqZ, neqZ=Type.neqZ, leZ=Type.leZ, lZ=Type.lZ;
-	enum isDelta=is(T==DDelta);
+	enum isDelta=is(T==DDeltaOld);
 	class Unwind:Exception{this(){super("");}} // TODO: get rid of this?
 	void unwind(){ throw new Unwind(); }
 	DExpr doIt(DExpr parity,Type ty,DExpr lhs,DExpr rhs){ // invariant: var does not occur in rhs or parity
@@ -2274,7 +2278,7 @@ in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,l
 			if(!cast(DMult)ow[1]){
 				// TODO: make sure this is correct for deltas
 				// (this is what the case split code did)
-				static if(isDelta) auto rest=dDelta(rhs);
+				static if(isDelta) auto rest=dDeltaOld(rhs);
 				else auto rest=dIvr(ty,-rhs);
 				return dIvr(eqZ,ow[0])*rest+dIvr(neqZ,ow[0])*doIt(parity*ow[0],ty,ow[1],rhs/ow[0]);
 			} // TODO: what if ow[1] is a product?
@@ -2390,7 +2394,7 @@ in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,l
 				if(summand is null) unwind();
 				DPlus.insert(special,summand);
 			}
-			return dIvr(neqZ,diff).linearizeConstraints(var)*dDelta(lhs-rhs)/diff+dPlus(special);
+			return dIvr(neqZ,diff).linearizeConstraints(var)*dDeltaOld(lhs-rhs)/diff+dPlus(special);
 		}
 		else return dIvr(ty,lhs-rhs);
 	}
@@ -2572,8 +2576,8 @@ DExprHoles!T getHoles(alias filter,T=DExpr)(DExpr e){
 			return dGaussIntInv(doIt(gi.x));
 		if(auto lg=cast(DLog)e)
 			return dLog(doIt(lg.e));
-		if(auto dl=cast(DDelta)e)
-			return dDelta(doIt(dl.var));
+		if(auto dl=cast(DDeltaOld)e)
+			return dDeltaOld(doIt(dl.var));
 		if(auto dl=cast(DDiscDelta)e)
 			return dDiscDelta(doIt(dl.e),doIt(dl.var));
 		if(auto ivr=cast(DIvr)e)
@@ -3183,7 +3187,7 @@ DVar getCanonicalFreeVar(DExpr e){
 bool isContinuousMeasure(DExpr expr){
 	if(!expr.hasFreeVars()) return true;
 	if(auto d=cast(DDistApply)expr) return false;
-	if(auto d=cast(DDelta)expr) return false;
+	if(auto d=cast(DDeltaOld)expr) return false;
 	if(auto d=cast(DDiscDelta)expr) return false;
 	if(cast(DIvr)expr||cast(DVar)expr||cast(DPow)expr||cast(DLog)expr||cast(DSin)expr||cast(DFloor)expr||cast(DCeil)expr||cast(DGaussInt)expr||cast(DGaussIntInv)expr||cast(DAbs)expr)
 		return true;
@@ -3210,7 +3214,7 @@ bool isContinuousMeasure(DExpr expr){
 bool isContinuousMeasureIn(DExpr expr,DVar var){ // TODO: get rid of code duplication.
 	if(!expr.hasFreeVar(var)) return true;
 	if(auto d=cast(DDistApply)expr) return !d.arg.hasFreeVar(var);
-	if(auto d=cast(DDelta)expr) return !d.var.hasFreeVar(var);
+	if(auto d=cast(DDeltaOld)expr) return !d.var.hasFreeVar(var);
 	if(auto d=cast(DDiscDelta)expr) return !d.var.hasFreeVar(var);
 	if(cast(DIvr)expr||cast(DVar)expr||cast(DPow)expr||cast(DLog)expr||cast(DSin)expr||cast(DFloor)expr||cast(DCeil)expr||cast(DGaussInt)expr||cast(DGaussIntInv)expr||cast(DAbs)expr)
 		return true;
@@ -3234,7 +3238,7 @@ bool isContinuousMeasureIn(DExpr expr,DVar var){ // TODO: get rid of code duplic
 	return false;
 }
 
-class DDelta: DExpr{ // Dirac delta, for ℝ
+class DDeltaOld: DExpr{ // Dirac delta, for ℝ
 	@even DExpr var;
 	alias subExprs=Seq!var;
 	override string toStringImpl(Format formatting,Precedence prec,int binders){
@@ -3267,9 +3271,9 @@ class DDelta: DExpr{ // Dirac delta, for ℝ
 
 	static DExpr staticSimplify(DExpr var,DExpr facts=one){
 		auto nvar=var.simplify(one); // cannot use all facts! (might remove a free variable)
-		if(nvar != var) return dDelta(nvar).simplify(facts);
+		if(nvar != var) return dDeltaOld(nvar).simplify(facts);
 		if(auto r=cancelFractions!true(nvar)) return r.simplify(facts);
-		if(auto fct=factorDIvr!(var=>dDelta(var))(nvar)) return fct.simplify(facts);
+		if(auto fct=factorDIvr!(var=>dDeltaOld(var))(nvar)) return fct.simplify(facts);
 		if(dEqZ(nvar).simplify(facts)==zero)
 			return zero;
 		return null;
@@ -3279,7 +3283,7 @@ class DDelta: DExpr{ // Dirac delta, for ℝ
 		return r?r:this;
 	}
 
-	static DExpr performSubstitution(DDelta d,DExpr expr){
+	static DExpr performSubstitution(DDeltaOld d,DExpr expr){
 		auto var=db1;
 		SolutionInfo info;
 		SolUse usage={caseSplit:false,bound:false};
@@ -3292,7 +3296,7 @@ class DDelta: DExpr{ // Dirac delta, for ℝ
 		return null;
 	}
 }
-mixin FactoryFunction!DDelta;
+mixin FactoryFunction!DDeltaOld;
 
 class DDiscDelta: DExpr{ // point mass for discrete data types
 	DExpr e,var;
@@ -3314,7 +3318,7 @@ class DDiscDelta: DExpr{ // point mass for discrete data types
 		static bool isNumeric(DExpr e){ // TODO: merge dDelta and dDiscDelta completely, such that type information is irrelevant
 			return cast(Dℚ)e||cast(DPlus)e||cast(DMult)e||cast(DPow)e||cast(DIvr)e||cast(DFloor)e||cast(DCeil)e||cast(DLog)e;
 		}
-		if(isNumeric(e)||isNumeric(var)) return dDelta(var-e);
+		if(isNumeric(e)||isNumeric(var)) return dDeltaOld(var-e);
 		return null;
 	}
 	static DExpr staticSimplify(DExpr e,DExpr var,DExpr facts=one){
