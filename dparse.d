@@ -105,7 +105,7 @@ struct DParser{
 				code.popFront();
 			}
 		}
-		return dParse(arg)^^e;
+		return dParse(arg,numBinders)^^e;
 	}
 
 	DExpr parseDAbs(){
@@ -117,7 +117,7 @@ struct DParser{
 		expect('|');
 		auto l=code.indexOf('|');
 		if(l==-1) l=code.length;
-		auto arg=DParser(code[0..l]).parseDExpr();
+		auto arg=dParse(code[0..l],numBinders);
 		code=code[l..$];
 		expect('|');
 		return dAbs(arg);
@@ -254,6 +254,7 @@ struct DParser{
 			for(;!rest.empty();rest.popFront())
 				i=10*i+cast(int)indexOf(lowDigits,rest.front);
 			if(neg) i=-i;
+			assert(numBinders-i+1>=0,text("numBinders: ",numBinders,", i: ",i,". negative de bruijn index at \"",code,"\""));
 			return dDeBruijnVar(numBinders-i+1);
 		}
 		return dVar(s);
@@ -369,7 +370,7 @@ struct DParser{
 				if(c=='[') nesting++;
 				if(c==']') nesting--;
 				if(nesting) continue;
-				auto p=DParser(code[i+1..$]);
+				auto p=DParser(code[i+1..$],numBinders);
 				if(p.cur()!='(') break;
 				next();
 				++numBinders;
@@ -525,7 +526,7 @@ struct DParser{
 	}
 
 	static bool isBinaryOp(dchar c){
-		return isMultChar(c)||isDivChar(c)||isAddChar(c)||isSubChar(c)||
+		return isMultChar(c)||isDivChar(c)||isAddChar(c)||isSubChar(c)||isCatChar(c)||
 			c == '↦' || c == '!' || c == '=' || c == '≠' ||
 			c == '≤' || c == '≥' || c == '<' || c == '>';
 	}
@@ -555,6 +556,9 @@ struct DParser{
 	static bool isSubChar(dchar c){
 		return c=='-';
 	}
+	static bool isCatChar(dchar c){
+		return c=='~';
+	}
 
 	DExpr parseMult(){
 		DExpr f=parseJMult();
@@ -572,12 +576,16 @@ struct DParser{
 
 	DExpr parseAdd(){
 		DExpr s=parseMult();
-		while(isAddChar(cur())||isSubChar(cur())){
+		while(isAddChar(cur())||isSubChar(cur())||isCatChar(cur())){
 			auto x=cur();
 			next();
 			auto c=parseMult();
-			if(x=='-') c=-c;
-			s=s+c;
+			if(isCatChar(x)){
+				s=s~c;
+			}else{
+			   if(isSubChar(x)) c=-c;
+			   s=s+c;
+			}
 		}
 		return s;
 	}
@@ -586,7 +594,7 @@ struct DParser{
 		return parseAdd();
 	}
 }
-DExpr dParse(string s){ // TODO: this is work in progress, usually updated in order to speed up debugging
-	return DParser(s).parseDExpr();
+DExpr dParse(string s,int numBinders=0){ // TODO: this is work in progress, usually updated in order to speed up debugging
+	return DParser(s,numBinders).parseDExpr();
 }
 

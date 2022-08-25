@@ -4213,13 +4213,13 @@ mixin FactoryFunction!DIndex;
 class DIUpdate: DOp{
 	DExpr e,i,n; // TODO: multiple indices?
 	alias subExprs=Seq!(e,i,n);
-	override string symbol(Format formatting,int binders){ return "[ ↦ ]"; }
+	override string symbol(Format formatting,int binders){ return "@[ ↦ ]"; }
 	override @property Precedence precedence(){
 		return Precedence.index; // TODO: ok? (there is no precedence to the rhs)
 	}
 	override string toStringImpl(Format formatting, Precedence prec, int binders){
 		if(formatting==Format.lisp) return text("(store ",e.toStringImpl(formatting,Precedence.none,binders)," ",i.toStringImpl(formatting,Precedence.none,binders)," ",n.toStringImpl(formatting,Precedence.none,binders));
-		return addp(prec, e.toStringImpl(formatting,Precedence.index,binders)~"["~i.toStringImpl(formatting,Precedence.none,binders)~
+		return addp(prec, e.toStringImpl(formatting,Precedence.index,binders)~"@["~i.toStringImpl(formatting,Precedence.none,binders)~
 					" ↦ "~n.toStringImpl(formatting,Precedence.none,binders)~"]");
 	}
 	mixin Visitors;
