@@ -4970,19 +4970,19 @@ DExpr dIsℤ(DExpr e){
 DExpr dGamma(DExpr t){
 	t=t.incDeBruijnVar(1,0);
 	auto x=db1;
-	return dInt(x^^(t-1)*dE^^(-x)*dGeZ(x));
+	return dInt(x^^(t-1)*dE^^(-x)*dGeZ(x)*dLebesgue(x));
 }
 
 DExpr dInGamma(DExpr a,DExpr z){
 	a=a.incDeBruijnVar(1,0), z=z.incDeBruijnVar(1,0);
 	auto t=db1;
-	return dIntSmp(t^^(a-1)*dE^^(-t)*dLe(z,t),one);
+	return dIntSmp(t^^(a-1)*dE^^(-t)*dLe(z,t)*dLebesgue(t),one);
 }
 
 DExpr dBeta(DExpr x,DExpr y){ // constraints: x>0 and y>0
 	x=x.incDeBruijnVar(1,0), y=y.incDeBruijnVar(1,0);
 	auto t=db1;
-	return dInt(dBounded!"[]"(t,zero,one)*t^^(x-1)*(1-t)^^(y-1));
+	return dInt(dBounded!"[]"(t,zero,one)*t^^(x-1)*(1-t)^^(y-1)*dLebesgue(t));
 }
 
 DExpr dNChooseK(DExpr n,DExpr k){
