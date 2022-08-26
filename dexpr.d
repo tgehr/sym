@@ -270,7 +270,8 @@ mixin template Visitors(){
 		static if(is(typeof(this):DAssocOp)||is(typeof(this):DCommutAssocOp))
 			assert(args[0].length>1);
 		static if(is(typeof(this)==DIvr)){
-			foreach(d;args[1].allOf!DDiscDelta) assert(0,text(args[1]));
+			foreach(d;args[1].allOf!DDeltaOld) assert(0,text(args[1]));
+			foreach(d;args[1].allOf!DDelta) assert(0,text(args[1]));
 		}
 	}do{
 		subExprs=args;
@@ -281,7 +282,7 @@ mixin template Visitors(){
 	override int forEachSubExpr(scope int delegate(DExpr) dg){
 		// TODO: fix this.
 		import dp: DDPDist;
-		static if(!(is(typeof(this)==DDPDist)||is(typeof(this)==DLambda)||is(typeof(this)==DDistLambda)||is(typeof(this)==DInt)||is(typeof(this)==DSum)||is(typeof(this)==DLim)||is(typeof(this)==DDiff)||is(typeof(this)==DDeltaOld)||is(typeof(this)==DDiscDelta)))
+		static if(!(is(typeof(this)==DDPDist)||is(typeof(this)==DLambda)||is(typeof(this)==DDistLambda)||is(typeof(this)==DInt)||is(typeof(this)==DSum)||is(typeof(this)==DLim)||is(typeof(this)==DDiff)||is(typeof(this)==DDeltaOld)||is(typeof(this)==DDelta)))
 			mixin(forEachSubExprImpl!"if(auto r=dg(x)) return r;");
 		return 0;
 	}
@@ -338,7 +339,7 @@ mixin template Visitors(){
 				}
 			}
 			if(nsubs==q(subExprs)) return this;
-			return mixin(lowerf(typeof(this).stringof))(nsubs.expand);
+			return mixin(constructorName!(typeof(this)))(nsubs.expand);
 		}
 	}
 	override IncDeBruijnVarType!(typeof(this)) incDeBruijnVarImpl(int di,int bound){
@@ -367,9 +368,14 @@ mixin template Visitors(){
 				}else nsubs[i]=sub;
 			}
 			if(nsubs==q(subExprs)) return this;
-			return mixin(lowerf(typeof(this).stringof))(nsubs.expand);
+			return mixin(constructorName!(typeof(this)))(nsubs.expand);
 		}
 	}
+}
+
+template constructorName(T){
+	static if(is(T==DDelta)) enum constructorName=`dDiscDelta`; // TODO: get rid of dDiscDelta
+	else enum constructorName=lowerf(T.stringof);
 }
 
 mixin template FactoryFunction(T){
@@ -395,7 +401,7 @@ mixin template FactoryFunction(T){
 		DExpr dGt(DExpr e1,DExpr e2){ return dLtZ(e2-e1); }
 	}else:
 
-	static if(is(T==DDiscDelta)){
+	static if(is(T==DDelta)){
 		import ast.expression; // TODO: remove this import
 		DExpr dDelta(DExpr e,DExpr var,Expression ty){ // TODO: dexpr shouldn't know about expression/type, but this is most convenient for overloading; TODO: get rid of this
 			import ast.type;
@@ -404,7 +410,7 @@ mixin template FactoryFunction(T){
 			return dDiscDelta(e,var);
 		}
 		DExpr dDelta(DExpr e,DExpr var){
-			//return dDiscDelta(e,var);
+			//return dDiscDelta(e,var); // TODO: remove dDiscDelta
 			return dDeltaOld(e-var); // TODO: get rid of this
 		}
 	}else static if(is(T==DInt)){ // TODO: generalize over DInt, DSum, DLim, DLambda, (DDiff)
@@ -500,7 +506,7 @@ mixin template FactoryFunction(T){
 	}
 	static if(is(T.subExprs==Seq!())){
 		mixin(mixin(X!q{
-			auto @(lowerf(T.stringof))(){
+			auto @(constructorName!T)(){
 				static T cache=null;
 				if(cache) return cache;
 				cache=new T();
@@ -508,8 +514,9 @@ mixin template FactoryFunction(T){
 			}
 		}));
 	}else:
+	// TODO: remove dDiscDelta
 	mixin(mixin(X!q{
-		auto @(lowerf(T.stringof))(typeof(T.subExprs) args){
+		auto @(constructorName!T)(typeof(T.subExprs) args){
 			static if(is(T:DCommutAssocOp)){
 				static assert(is(typeof(args)==Seq!DExprSet));
 				if(args[0].length==1) return args[0].element;
@@ -531,18 +538,18 @@ mixin template FactoryFunction(T){
 	}));
 	static if(is(T:DBinaryOp)||is(T:DAssocOp)){
 		mixin(mixin(X!q{
-			auto @(lowerf(T.stringof))(DExpr e1,DExpr e2){
-				return @(lowerf(T.stringof))([e1,e2]);
+			auto @(constructorName!T)(DExpr e1,DExpr e2){
+				return @(constructorName!T)([e1,e2]);
 			}
 		}));
 	}
 	static if(is(T:DCommutAssocOp)){
 		mixin(mixin(X!q{
-			auto @(lowerf(T.stringof))(DExpr e1,DExpr e2){
+			auto @(constructorName!T)(DExpr e1,DExpr e2){
 				DExprSet a;
 				T.insert(a,e1);
 				T.insert(a,e2);
-				return @(lowerf(T.stringof))(a);
+				return @(constructorName!T)(a);
 			}
 		}));
 	}
@@ -1400,7 +1407,7 @@ class DMult: DCommutAssocOp{
 		// TODO: this is a major bottleneck!
 		auto ne=basicSimplify();
 		if(ne != this) return ne.simplify(facts);
-		foreach(f;this.factors) if(auto d=cast(DDiscDelta)f){ // TODO: do this in a nicer way
+		foreach(f;this.factors) if(auto d=cast(DDelta)f){ // TODO: do this in a nicer way
 			auto wo=this.withoutFactor(f);
 			auto var=cast(DVar)d.var;
 			if(var&&wo.hasFreeVar(var) && !d.e.hasFreeVar(var))
@@ -2577,7 +2584,7 @@ DExprHoles!T getHoles(alias filter,T=DExpr)(DExpr e){
 			return dLog(doIt(lg.e));
 		if(auto dl=cast(DDeltaOld)e)
 			return dDeltaOld(doIt(dl.var));
-		if(auto dl=cast(DDiscDelta)e)
+		if(auto dl=cast(DDelta)e)
 			return dDiscDelta(doIt(dl.e),doIt(dl.var));
 		if(auto ivr=cast(DIvr)e)
 			return dIvr(ivr.type,doIt(ivr.e));
@@ -3187,7 +3194,7 @@ bool isContinuousMeasure(DExpr expr){
 	if(!expr.hasFreeVars()) return true;
 	if(auto d=cast(DDistApply)expr) return false;
 	if(auto d=cast(DDeltaOld)expr) return false;
-	if(auto d=cast(DDiscDelta)expr) return false;
+	if(auto d=cast(DDelta)expr) return false;
 	if(cast(DIvr)expr||cast(DVar)expr||cast(DPow)expr||cast(DLog)expr||cast(DSin)expr||cast(DFloor)expr||cast(DCeil)expr||cast(DGaussInt)expr||cast(DGaussIntInv)expr||cast(DAbs)expr)
 		return true;
 	if(auto p=cast(DPlus)expr){
@@ -3214,7 +3221,7 @@ bool isContinuousMeasureIn(DExpr expr,DVar var){ // TODO: get rid of code duplic
 	if(!expr.hasFreeVar(var)) return true;
 	if(auto d=cast(DDistApply)expr) return !d.arg.hasFreeVar(var);
 	if(auto d=cast(DDeltaOld)expr) return !d.var.hasFreeVar(var);
-	if(auto d=cast(DDiscDelta)expr) return !d.var.hasFreeVar(var);
+	if(auto d=cast(DDelta)expr) return !d.var.hasFreeVar(var);
 	if(cast(DIvr)expr||cast(DVar)expr||cast(DPow)expr||cast(DLog)expr||cast(DSin)expr||cast(DFloor)expr||cast(DCeil)expr||cast(DGaussInt)expr||cast(DGaussIntInv)expr||cast(DAbs)expr)
 		return true;
 	if(auto p=cast(DPlus)expr){
@@ -3297,7 +3304,7 @@ class DDeltaOld: DExpr{ // Dirac delta, for ℝ
 }
 mixin FactoryFunction!DDeltaOld;
 
-class DDiscDelta: DExpr{ // point mass for discrete data types
+class DDelta: DExpr{ // point mass
 	DExpr e,var;
 	alias subExprs=Seq!(e,var);
 	override string toStringImpl(Format formatting,Precedence prec,int binders){
@@ -3347,7 +3354,7 @@ class DDiscDelta: DExpr{ // point mass for discrete data types
 		return r?r:this;
 	}
 }
-mixin FactoryFunction!DDiscDelta;
+mixin FactoryFunction!DDelta;
 
 DExpr[2] splitPlusAtVar(DExpr e,DVar var){
 	DExprSet outside, within;
