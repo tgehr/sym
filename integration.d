@@ -48,7 +48,7 @@ private DExpr definiteIntegralImpl(DExpr expr,DExpr facts=one){
 	DExpr discDeltaSubstitution(){
 		foreach(f;expr.factors){
 			if(!f.hasFreeVar(var)) continue;
-			if(auto d=cast(DDiscDelta)f){
+			if(auto d=cast(DDelta)f){
 				if(d.var == var && !d.e.hasFreeVar(var))
 					return expr.withoutFactor(f).substitute(var,d.e).incDeBruijnVar(-1,0).simplify(facts);
 				if(d.e == var) // TODO: more complex "inversions"?
@@ -71,7 +71,7 @@ private DExpr definiteIntegralImpl(DExpr expr,DExpr facts=one){
 		return null;
 	}
 	if(auto r=oldDeltaSubstitution()) return r;
-	foreach(T;Seq!(DDiscDelta,DDeltaOld,DIvr)){ // TODO: need to split on DIvr?
+	foreach(T;Seq!(DDelta,DDeltaOld,DIvr)){ // TODO: need to split on DIvr?
 		foreach(f;expr.factors){
 			if(auto p=cast(DPlus)f){
 				bool check(){
