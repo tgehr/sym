@@ -374,8 +374,7 @@ mixin template Visitors(){
 }
 
 template constructorName(T){
-	static if(is(T==DDelta)) enum constructorName=`dDiscDelta`; // TODO: get rid of dDiscDelta
-	else enum constructorName=lowerf(T.stringof);
+	enum constructorName=lowerf(T.stringof);
 }
 
 mixin template FactoryFunction(T){
@@ -407,11 +406,7 @@ mixin template FactoryFunction(T){
 			import ast.type;
 			if(isSubtype(ty,ℝ(true))) return dDeltaOld(e-var); // TODO: get rid of this
 			assert(cast(TupleTy)ty||cast(VectorTy)ty||cast(ArrayTy)ty||cast(AggregateTy)ty||cast(ContextTy)ty||cast(FunTy)ty||cast(TypeTy)ty||cast(Identifier)ty||cast(CallExp)ty,text(ty)); // TODO: add more supported types
-			return dDiscDelta(e,var);
-		}
-		DExpr dDelta(DExpr e,DExpr var){
-			//return dDiscDelta(e,var); // TODO: remove dDiscDelta
-			return dDeltaOld(e-var); // TODO: get rid of this
+			return dDelta(e,var);
 		}
 	}else static if(is(T==DInt)){ // TODO: generalize over DInt, DSum, DLim, DLambda, (DDiff)
 		@disable DExpr dIntSmp(DVar var,DExpr expr);
@@ -514,7 +509,6 @@ mixin template FactoryFunction(T){
 			}
 		}));
 	}else:
-	// TODO: remove dDiscDelta
 	mixin(mixin(X!q{
 		auto @(constructorName!T)(typeof(T.subExprs) args){
 			static if(is(T:DCommutAssocOp)){
@@ -2585,7 +2579,7 @@ DExprHoles!T getHoles(alias filter,T=DExpr)(DExpr e){
 		if(auto dl=cast(DDeltaOld)e)
 			return dDeltaOld(doIt(dl.var));
 		if(auto dl=cast(DDelta)e)
-			return dDiscDelta(doIt(dl.e),doIt(dl.var));
+			return dDelta(doIt(dl.e),doIt(dl.var));
 		if(auto ivr=cast(DIvr)e)
 			return dIvr(ivr.type,doIt(ivr.e));
 		/+if(auto sn=cast(DSin)e)
@@ -3321,7 +3315,7 @@ class DDelta: DExpr{ // point mass
 
 	static DExpr constructHook(DExpr e,DExpr var){
 		//if(auto v=cast(DVar)var) assert(!e.hasFreeVar(v));
-		static bool isNumeric(DExpr e){ // TODO: merge dDelta and dDiscDelta completely, such that type information is irrelevant
+		static bool isNumeric(DExpr e){ // TODO: merge dDeltaOld and dDelta completely, such that type information is irrelevant
 			return cast(Dℚ)e||cast(DPlus)e||cast(DMult)e||cast(DPow)e||cast(DIvr)e||cast(DFloor)e||cast(DCeil)e||cast(DLog)e;
 		}
 		if(isNumeric(e)||isNumeric(var)) return dDeltaOld(var-e);
@@ -3333,16 +3327,16 @@ class DDelta: DExpr{ // point mass
 		// allowed to introduce free variables from var into e, or remove free variables from var.
 		// TODO: filter more precisely
 		auto ne=e.simplify(one), nvar=var.simplify(one);
-		if(ne != e || nvar != var) return dDiscDelta(ne,nvar).simplify(facts); // (might be rewritten to normal delta)
-		if(auto fct=factorDIvr!(e=>dDiscDelta(e,nvar))(ne)) return fct.simplify(facts);
-		if(auto fct=factorDIvr!(var=>dDiscDelta(ne,var))(nvar)) return fct.simplify(facts);
+		if(ne != e || nvar != var) return dDelta(ne,nvar).simplify(facts); // (might be rewritten to normal delta)
+		if(auto fct=factorDIvr!(e=>dDelta(e,nvar))(ne)) return fct.simplify(facts);
+		if(auto fct=factorDIvr!(var=>dDelta(ne,var))(nvar)) return fct.simplify(facts);
 		//if(dEq(var,e).simplify(facts) is zero) return zero; // a simplification like this might be possible (but at the moment we can compare only real numbers
 		if(auto vtpl=cast(DTuple)var){ // δ(1,2,3,...)[(x,y,z,...)].
 			if(auto etpl=cast(DTuple)e){
 				if(vtpl.values.length==etpl.values.length){
 					DExprSet factors;
 					foreach(i;0..vtpl.values.length)
-						DMult.insert(factors,dDiscDelta(etpl[i],vtpl[i]));
+						DMult.insert(factors,dDelta(etpl[i],vtpl[i]));
 					return dMult(factors).simplify(facts);
 				}
 			}
@@ -4723,7 +4717,7 @@ class DNormalize: DExpr{
 		auto nnorm=dIntSmp(dDistApply(ne.incDeBruijnVar(1,0),db1),facts);
 		auto iszero=dEqZ(nnorm).simplify(facts);
 		if(iszero==zero) return dLambda(dDistApply(ne.incDeBruijnVar(1,0),db1)/nnorm).simplify(facts);
-		if(iszero==one) return dLambda(dDiscDelta(dErr,db1));
+		if(iszero==one) return dLambda(dDelta(dErr,db1));
 		if(ne!=e) return dNormalize(ne).simplify(facts);
 		return this;
 	}

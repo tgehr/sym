@@ -72,7 +72,7 @@ struct DParser{
 		bool round=false;
 		auto expr=parseParenthesized('(',')');
 		auto var=parseParenthesized('[',']');
-		return expr is zero?dDeltaOld(var):dDiscDelta(expr,var);
+		return expr is zero?dDeltaOld(var):dDelta(expr,var);
 	}
 		
 	DExpr parseSqrt(){
