@@ -266,11 +266,12 @@ struct DParser{
 	}
 
 	DExpr parseDLambda(){
-		expect('λ');
-		if(cur()=='['){
+		if(code.startsWith("lambda[")||code.startsWith("λ[")){
+			code=code[code[0]=='l'?"lambda".length:"λ".length..$];
 			auto var=parseParenthesized('[',']');
 			return dLebesgue(var);
 		}
+		expect('λ');
 		if(cur()=='('){
 			DVar[] args;
 			do{
@@ -412,7 +413,7 @@ struct DParser{
 		if(cur()=='δ'||code.startsWith("delta")) return parseDDelta();
 		if(cur()=='∫') return parseDInt();
 		if(cur()=='∑'||code.startsWith("sum")) return parseDSum();
-		if(cur()=='λ') return parseDLambda();
+		if(cur()=='λ'||code.startsWith("lambda[")) return parseDLambda();
 		if(cur()=='Λ') return parseDDistLambda();
 		if(util.among(cur(),'√','∛','∜')) return parseSqrt();
 		if(cur()=='|'||code.startsWith("abs")) return parseDAbs();
