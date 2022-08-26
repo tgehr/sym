@@ -405,8 +405,8 @@ mixin template FactoryFunction(T){
 		import ast.expression; // TODO: remove this import
 		DExpr dDelta(DExpr e,DExpr var,Expression ty){ // TODO: dexpr shouldn't know about expression/type, but this is most convenient for overloading; TODO: get rid of this
 			import ast.type;
-			if(isSubtype(ty,ℝ(true))) return dDeltaOld(e-var); // TODO: get rid of this
-			assert(cast(TupleTy)ty||cast(VectorTy)ty||cast(ArrayTy)ty||cast(AggregateTy)ty||cast(ContextTy)ty||cast(FunTy)ty||cast(TypeTy)ty||cast(Identifier)ty||cast(CallExp)ty,text(ty)); // TODO: add more supported types
+			// if(isSubtype(ty,ℝ(true))) return dDeltaOld(e-var); // TODO: get rid of this
+			//assert(cast(TupleTy)ty||cast(VectorTy)ty||cast(ArrayTy)ty||cast(AggregateTy)ty||cast(ContextTy)ty||cast(FunTy)ty||cast(TypeTy)ty||cast(Identifier)ty||cast(CallExp)ty,text(ty)); // TODO: add more supported types
 			return dDelta(e,var);
 		}
 	}else static if(is(T==DInt)){ // TODO: generalize over DInt, DSum, DLim, DLambda, (DDiff)
@@ -3185,58 +3185,189 @@ DVar getCanonicalFreeVar(DExpr e){
 	return getCanonicalVar(e.freeVars);
 }
 
-bool isContinuousMeasure(DExpr expr){
+bool isNumericalConstant(DExpr expr){ // TODO: add types to subexpressions?
+	if(cast(Dℚ)expr) return true;
+	if(cast(DFloat)expr) return true;
+	if(cast(DE)expr) return true;
+	if(cast(DΠ)expr) return true;
+	return false;
+}
+
+bool isRealNumber(DExpr expr,int numBound){ // (expr should be a factor of a distribution term)
+	if(isNumericalConstant(expr)) return true;
 	if(!expr.hasFreeVars()) return true;
+	if(auto d=cast(DLambda)expr) return false;
 	if(auto d=cast(DDistApply)expr) return false;
 	if(auto d=cast(DDeltaOld)expr) return false;
 	if(auto d=cast(DDelta)expr) return false;
+	if(auto d=cast(DLebesgue)expr){
+		if(auto v=cast(DDeBruijnVar)d.var){
+			if(v.i<=numBound)
+				return true;
+		}
+		return false;
+	}
 	if(cast(DIvr)expr||cast(DVar)expr||cast(DPow)expr||cast(DLog)expr||cast(DSin)expr||cast(DFloor)expr||cast(DCeil)expr||cast(DGaussInt)expr||cast(DGaussIntInv)expr||cast(DAbs)expr)
 		return true;
 	if(auto p=cast(DPlus)expr){
 		foreach(s;p.summands)
-			if(!isContinuousMeasure(s))
+			if(!isRealNumber(s,numBound))
 				return false;
 		return true;
 	}
 	if(auto m=cast(DMult)expr){
 		foreach(f;m.factors)
-			if(!isContinuousMeasure(f))
+			if(!isRealNumber(f,numBound))
 				return false;
 		return true;
 	}
-	if(auto i=cast(DInt)expr) return isContinuousMeasure(i.expr);
+	if(auto i=cast(DInt)expr) return isRealNumber(i.expr,numBound+1); // TODO: fix
+	if(auto s=cast(DSum)expr) return isRealNumber(s.expr,numBound+1); // TODO: fix
 	if(auto c=cast(DMCase)expr){
-		if(!isContinuousMeasure(c.val)) return false;
-		return isContinuousMeasure(c.err);
+		if(!isRealNumber(c.val,numBound+1)) return false;
+		return isRealNumber(c.err,numBound);
+	}
+	return false;
+
+}
+
+DExpr withoutLebesgue(DExpr expr,int numBound){
+	if(auto d=cast(DLebesgue)expr){
+		if(auto v=cast(DDeBruijnVar)d.var){
+			if(v.i<=numBound)
+				return expr;
+		}
+		return one;
+	}
+	if(auto p=cast(DPlus)expr){
+		DExprSet summands;
+		foreach(s;p.summands)
+			DPlus.insert(summands,withoutLebesgue(s,numBound));
+		return dPlus(summands);
+	}
+	if(auto m=cast(DMult)expr){
+		DExprSet factors;
+		foreach(f;m.factors)
+			DMult.insert(factors,withoutLebesgue(f,numBound));
+		return dMult(factors);
+	}
+	if(auto i=cast(DInt)expr) return dInt(withoutLebesgue(i.expr,numBound+1));
+	if(auto s=cast(DSum)expr) return dSum(withoutLebesgue(s.expr,numBound+1));
+	if(auto c=cast(DMCase)expr){
+		return dMCase(
+			c.e,
+			withoutLebesgue(c.val,numBound+1), // (not actually integrated, but good enough)
+			withoutLebesgue(c.err,numBound),
+		);
+	}
+	return expr;
+}
+
+DExpr densityOfAfterIntegration(DExpr expr,DVar var,int numBound){
+	if(auto d=cast(DLebesgue)expr){
+		if(auto v=cast(DDeBruijnVar)d.var){
+			if(v.i<=numBound)
+				return expr;
+		}
+		return d.var==var?one:expr;
+	}
+	if(auto p=cast(DPlus)expr){
+		DExprSet summands;
+		foreach(s;p.summands)
+			DPlus.insert(summands,densityOfAfterIntegration(s,var,numBound));
+		return dPlus(summands);
+	}
+	if(auto m=cast(DMult)expr){
+		DExprSet factors;
+		foreach(f;m.factors)
+			DMult.insert(factors,densityOfAfterIntegration(f,var,numBound));
+		return dMult(factors);
+	}
+	if(auto i=cast(DInt)expr) return dInt(densityOfAfterIntegration(i.expr,var,numBound+1));
+	if(auto s=cast(DSum)expr) return dSum(densityOfAfterIntegration(s.expr,var,numBound+1));
+	if(auto c=cast(DMCase)expr){
+		return dMCase(
+			c.e,
+			densityOfAfterIntegration(c.val,var,numBound+1), // (not actually integrated, but good enough)
+			densityOfAfterIntegration(c.err,var,numBound),
+		);
+	}
+	return expr;
+}
+
+DExpr densityOf(DExpr expr,DVar var){
+	return densityOfAfterIntegration(expr,var,0);
+}
+
+bool isContinuousMeasureAfterIntegration(DExpr expr,int numBound){ // assumes input is a well-formed distribution expression
+	if(auto d=cast(DLebesgue)expr){
+		if(auto v=cast(DDeBruijnVar)d.var){
+			if(v.i<=numBound)
+				return false;
+		}
+		return true;
+	}
+	if(auto d=cast(DDistApply)expr) return false;
+	if(auto d=cast(DDeltaOld)expr) return false;
+	if(auto d=cast(DDelta)expr) return false;
+	if(auto p=cast(DPlus)expr){
+		foreach(s;p.summands)
+			if(!isContinuousMeasureAfterIntegration(s,numBound))
+				return false;
+		return true;
+	}
+	if(auto m=cast(DMult)expr){
+		foreach(s;m.factors){
+			if(isContinuousMeasureAfterIntegration(s,numBound))
+				return true;
+		}
+		return false;
+	}
+	if(auto i=cast(DInt)expr) return isContinuousMeasureAfterIntegration(i.expr,numBound+1);
+	if(auto s=cast(DSum)expr) return isContinuousMeasureAfterIntegration(s.expr,numBound+1);
+	if(auto c=cast(DMCase)expr){
+		if(!isContinuousMeasureAfterIntegration(c.val,numBound+1)) return false;
+		if(!isContinuousMeasureAfterIntegration(c.err,numBound)) return false;
+		return true;
 	}
 	return false;
 }
 
-bool isContinuousMeasureIn(DExpr expr,DVar var){ // TODO: get rid of code duplication.
-	if(!expr.hasFreeVar(var)) return true;
-	if(auto d=cast(DDistApply)expr) return !d.arg.hasFreeVar(var);
-	if(auto d=cast(DDeltaOld)expr) return !d.var.hasFreeVar(var);
-	if(auto d=cast(DDelta)expr) return !d.var.hasFreeVar(var);
-	if(cast(DIvr)expr||cast(DVar)expr||cast(DPow)expr||cast(DLog)expr||cast(DSin)expr||cast(DFloor)expr||cast(DCeil)expr||cast(DGaussInt)expr||cast(DGaussIntInv)expr||cast(DAbs)expr)
-		return true;
+bool isContinuousMeasure(DExpr expr){
+	return isContinuousMeasureAfterIntegration(expr,0);
+}
+
+bool isContinuousMeasureInAfterIntegration(DExpr expr,DVar var,int numBound){ // TODO: get rid of code duplication.
+	if(auto d=cast(DLebesgue)expr){
+		if(auto v=cast(DDeBruijnVar)d.var){
+			if(v.i<=numBound)
+				return false;
+		}
+		return d.var==var;
+	}
 	if(auto p=cast(DPlus)expr){
 		foreach(s;p.summands)
-			if(!isContinuousMeasureIn(s,var))
+			if(!isContinuousMeasureInAfterIntegration(s,var,numBound))
 				return false;
 		return true;
 	}
 	if(auto m=cast(DMult)expr){
 		foreach(f;m.factors)
-			if(!isContinuousMeasureIn(f,var))
-				return false;
-		return true;
+			if(isContinuousMeasureInAfterIntegration(f,var,numBound))
+				return true;
+		return false;
 	}
-	if(auto i=cast(DInt)expr) return isContinuousMeasureIn(i.expr,var.incDeBruijnVar(1,0));
+	if(auto i=cast(DInt)expr) return isContinuousMeasureInAfterIntegration(i.expr,var.incDeBruijnVar(1,0),numBound+1);
+	if(auto s=cast(DSum)expr) return isContinuousMeasureInAfterIntegration(s.expr,var.incDeBruijnVar(1,0),numBound+1);
 	if(auto c=cast(DMCase)expr){
-		if(!isContinuousMeasureIn(c.val,var.incDeBruijnVar(1,0))) return false;
-		return isContinuousMeasureIn(c.err,var);
+		if(!isContinuousMeasureInAfterIntegration(c.val,var.incDeBruijnVar(1,0),numBound+1)) return false;
+		return isContinuousMeasureInAfterIntegration(c.err,var,numBound);
 	}
 	return false;
+}
+
+bool isContinuousMeasureIn(DExpr expr,DVar var){
+	return isContinuousMeasureInAfterIntegration(expr,var,0);
 }
 
 class DDeltaOld: DExpr{ // Dirac delta, for ℝ
@@ -3315,11 +3446,12 @@ class DDelta: DExpr{ // point mass
 	mixin Visitors;
 
 	static DExpr constructHook(DExpr e,DExpr var){
+		//assert(!cast(Dℚ)var);
 		//if(auto v=cast(DVar)var) assert(!e.hasFreeVar(v));
 		static bool isNumeric(DExpr e){ // TODO: merge dDeltaOld and dDelta completely, such that type information is irrelevant
 			return cast(Dℚ)e||cast(DPlus)e||cast(DMult)e||cast(DPow)e||cast(DIvr)e||cast(DFloor)e||cast(DCeil)e||cast(DLog)e;
 		}
-		if(isNumeric(e)||isNumeric(var)) return dDeltaOld(var-e);
+		//if(isNumeric(e)||isNumeric(var)) return dDeltaOld(var-e);
 		return null;
 	}
 	static DExpr staticSimplify(DExpr e,DExpr var,DExpr facts=one){
@@ -3328,7 +3460,7 @@ class DDelta: DExpr{ // point mass
 		// allowed to introduce free variables from var into e, or remove free variables from var.
 		// TODO: filter more precisely
 		auto ne=e.simplify(one), nvar=var.simplify(one);
-		if(ne != e || nvar != var) return dDelta(ne,nvar).simplify(facts); // (might be rewritten to normal delta)
+		if(ne != e || nvar != var) return dDelta(ne,nvar).simplify(facts);
 		if(auto fct=factorDIvr!(e=>dDelta(e,nvar))(ne)) return fct.simplify(facts);
 		if(auto fct=factorDIvr!(var=>dDelta(ne,var))(nvar)) return fct.simplify(facts);
 		//if(dEq(var,e).simplify(facts) is zero) return zero; // a simplification like this might be possible (but at the moment we can compare only real numbers
@@ -3350,6 +3482,40 @@ class DDelta: DExpr{ // point mass
 	}
 }
 mixin FactoryFunction!DDelta;
+
+class DLebesgue: DExpr{ // lebesgue measure
+	DExpr var;
+
+	alias subExprs=Seq!var;
+	override string toStringImpl(Format formatting,Precedence prec,int binders){
+		if(formatting==Format.mathematica)
+			// return text("Lebesgue[",var.toStringImpl(formatting,Precedence.none,binders),"]");
+			return "1";
+		if(formatting==Format.lisp) // TODO: better name
+			return text("(lebesgue ",var.toStringImpl(formatting,Precedence.subscript,binders),")");
+		// TODO: encoding for other CAS?
+		return "λ["~var.toStringImpl(formatting,Precedence.subscript,binders)~"]";
+	}
+
+	static DExpr constructHook(DExpr var){
+		//assert(!cast(Dℚ)var);
+		return null;
+	}
+	mixin Visitors;
+
+	static DExpr staticSimplify(DExpr var,DExpr facts=one){
+		// TODO: should we even attempt to simplify var?
+		auto nvar=var.simplify(one);
+		if(nvar != var) return dLebesgue(nvar).simplify(facts);
+		return null;
+	}
+	override DExpr simplifyImpl(DExpr facts){
+		auto r=staticSimplify(var,facts);
+		return r?r:this;
+	}
+}
+mixin FactoryFunction!DLebesgue;
+
 
 DExpr[2] splitPlusAtVar(DExpr e,DVar var){
 	DExprSet outside, within;

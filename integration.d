@@ -158,7 +158,7 @@ private DExpr definiteIntegralImpl(DExpr expr,DExpr facts=one){
 	}
 	assert(var == db1);
 	if(auto r=fubini()) return r;
-	if(!expr.hasFreeVar(var)) return expr.incDeBruijnVar(-1,0)*dInt(one); // (infinite integral)
+	if(!expr.hasFreeVar(var)) return expr.incDeBruijnVar(-1,0)*dInt(dLambda(var)); // (infinite integral)
 	return null;
 }
 
@@ -171,7 +171,7 @@ private DExpr definiteIntegralContinuous(DExpr expr,DExpr facts)out(res){
 	// ensure integral is continuous
 	auto var=db1;
 	if(!expr.isContinuousMeasureIn(var)) return null;
-	if(auto r=tryIntegrate(expr))
+	if(auto r=tryIntegrate(expr.densityOf(var)))
 		return r.simplify(facts);
 	return null;
 }

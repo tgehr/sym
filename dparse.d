@@ -72,7 +72,7 @@ struct DParser{
 		bool round=false;
 		auto expr=parseParenthesized('(',')');
 		auto var=parseParenthesized('[',']');
-		return expr is zero?dDeltaOld(var):dDelta(expr,var);
+		return dDelta(expr,var);
 	}
 		
 	DExpr parseSqrt(){
@@ -267,6 +267,10 @@ struct DParser{
 
 	DExpr parseDLambda(){
 		expect('λ');
+		if(cur()=='['){
+			auto var=parseParenthesized('[',']');
+			return dLebesgue(var);
+		}
 		if(cur()=='('){
 			DVar[] args;
 			do{
