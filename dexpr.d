@@ -1406,7 +1406,7 @@ class DMult: DCommutAssocOp{
 			auto wo=this.withoutFactor(f);
 			auto var=cast(DVar)d.var;
 			if(var&&wo.hasFreeVar(var) && !d.e.hasFreeVar(var))
-				return (wo.substitute(var,d.e)*d).simplify(facts);
+				return (wo.substitute(var,d.e).simplify(facts.substitute(var,d.e).simplify(one))*d).simplify(facts);
 		}
 	Louter: foreach(f;this.factors) if(auto d=cast(DDeltaOld)f){
 			auto fact=dEqZ(d.var).simplify(facts);
@@ -2805,10 +2805,10 @@ class DIvr: DExpr{ // iverson brackets
 			// TODO: ok?
 			DExpr y(bool b){ return b?one:zero; }
 			final switch(type) with(Type){
-			case eqZ: return y(approxEqual(f.c,0));
-			case neqZ: return y(!approxEqual(f.c,0));
-			case lZ: return y(f.c<=0&&!approxEqual(f.c,0));
-			case leZ: return y(f.c<=0||approxEqual(f.c,0));
+			case eqZ: return y(approxEqual(f.c,0)).simplify(facts);
+			case neqZ: return y(!approxEqual(f.c,0)).simplify(facts);
+			case lZ: return y(f.c<=0&&!approxEqual(f.c,0)).simplify(facts);
+			case leZ: return y(f.c<=0||approxEqual(f.c,0)).simplify(facts);
 			}
 		}
 		if(type==Type.lZ) return (dIvr(Type.leZ,e)*dIvr(Type.neqZ,e)).simplify(facts);
@@ -2991,13 +2991,13 @@ class DIvr: DExpr{ // iverson brackets
 				// TODO: ⌊⌋/⌈⌉, ...
 				if(auto la=cast(DLog)a) // log is strictly monotone increasing
 					if(auto lb=cast(DLog)b)
-						return dIvr(type,la.e-lb.e);
+						return dIvr(type,la.e-lb.e).simplify(facts);
 				if(auto ga=cast(DGaussInt)a) // gauss integral is strictly monotone increasing
 					if(auto gb=cast(DGaussInt)b)
-						return dIvr(type,ga.x-gb.x);
+						return dIvr(type,ga.x-gb.x).simplify(facts);
 				if(auto ga=cast(DGaussIntInv)a) // inverse gauss integral is strictly monotone increasing
 					if(auto gb=cast(DGaussIntInv)b)
-						return dIvr(type,ga.x-gb.x);
+						return dIvr(type,ga.x-gb.x).simplify(facts);
 				auto abase=a, aexp=one;
 				auto bbase=b, bexp=one;
 				if(auto pa=cast(DPow)a) abase=pa.operands[0], aexp=pa.operands[1];
@@ -3300,37 +3300,47 @@ DExpr densityOf(DExpr expr,DVar var){
 }
 
 bool isContinuousMeasureAfterIntegration(DExpr expr,int numBound){ // assumes input is a well-formed distribution expression
-	if(auto d=cast(DLebesgue)expr){
-		if(auto v=cast(DDeBruijnVar)d.var){
-			if(v.i<=numBound)
-				return false;
+	bool bad=false;
+	bool rec(DExpr expr,int numBound){
+		if(bad) return false;
+		if(auto d=cast(DLebesgue)expr){
+			if(auto v=cast(DDeBruijnVar)d.var){
+				if(v.i<=numBound)
+					return false;
+			}
+			return true;
 		}
-		return true;
-	}
-	if(auto d=cast(DDistApply)expr) return false;
-	if(auto d=cast(DDeltaOld)expr) return false;
-	if(auto d=cast(DDelta)expr) return false;
-	if(auto p=cast(DPlus)expr){
-		foreach(s;p.summands)
-			if(!isContinuousMeasureAfterIntegration(s,numBound))
-				return false;
-		return true;
-	}
-	if(auto m=cast(DMult)expr){
-		foreach(s;m.factors){
-			if(isContinuousMeasureAfterIntegration(s,numBound))
-				return true;
+		if(auto d=cast(DDistApply)expr){ bad=true; return false; }
+		if(auto d=cast(DDeltaOld)expr){ bad=true; return false; }
+		if(auto d=cast(DDelta)expr){ bad=true; return false; }
+		if(auto p=cast(DPlus)expr){
+			bool ok=false;
+			foreach(s;p.summands){
+				ok|=rec(s,numBound);
+				if(bad) return false;
+			}
+			return ok;
+		}
+		if(auto m=cast(DMult)expr){
+			bool ok=false;
+			foreach(s;m.factors){
+				ok|=rec(s,numBound);
+				if(bad) return false;
+			}
+			return ok;
+		}
+		if(auto i=cast(DInt)expr) return rec(i.expr,numBound+1);
+		if(auto s=cast(DSum)expr) return rec(s.expr,numBound+1);
+		if(auto c=cast(DMCase)expr){
+			if(!rec(c.val,numBound+1)) return false;
+			if(bad) return false;
+			if(!rec(c.err,numBound)) return false;
+			if(bad) return false;
+			return true;
 		}
 		return false;
 	}
-	if(auto i=cast(DInt)expr) return isContinuousMeasureAfterIntegration(i.expr,numBound+1);
-	if(auto s=cast(DSum)expr) return isContinuousMeasureAfterIntegration(s.expr,numBound+1);
-	if(auto c=cast(DMCase)expr){
-		if(!isContinuousMeasureAfterIntegration(c.val,numBound+1)) return false;
-		if(!isContinuousMeasureAfterIntegration(c.err,numBound)) return false;
-		return true;
-	}
-	return false;
+	return rec(expr,numBound)&&!bad;
 }
 
 bool isContinuousMeasure(DExpr expr){
@@ -3338,32 +3348,40 @@ bool isContinuousMeasure(DExpr expr){
 }
 
 bool isContinuousMeasureInAfterIntegration(DExpr expr,DVar var,int numBound){ // TODO: get rid of code duplication.
-	if(auto d=cast(DLebesgue)expr){
-		if(auto v=cast(DDeBruijnVar)d.var){
-			if(v.i<=numBound)
-				return false;
+	bool bad=false;
+	bool rec(DExpr expr,DVar var,int numBound){
+		if(bad) return false;
+		if(auto d=cast(DLebesgue)expr){
+			if(auto v=cast(DDeBruijnVar)d.var){
+				if(v.i<=numBound)
+					return false;
+			}
+			return d.var==var;
 		}
-		return d.var==var;
-	}
-	if(auto p=cast(DPlus)expr){
-		foreach(s;p.summands)
-			if(!isContinuousMeasureInAfterIntegration(s,var,numBound))
-				return false;
-		return true;
-	}
-	if(auto m=cast(DMult)expr){
-		foreach(f;m.factors)
-			if(isContinuousMeasureInAfterIntegration(f,var,numBound))
-				return true;
+		if(auto d=cast(DDistApply)expr){ bad=expr.hasFreeVar(var); return !bad; }
+		if(auto d=cast(DDeltaOld)expr){ bad=expr.hasFreeVar(var); return !bad; }
+		if(auto d=cast(DDelta)expr){ bad=expr.hasFreeVar(var); return !bad; }
+		if(auto p=cast(DPlus)expr){
+			bool ok=true;
+			foreach(s;p.summands)
+				ok&=rec(s,var,numBound);
+			return ok;
+		}
+		if(auto m=cast(DMult)expr){
+			bool ok=false;
+			foreach(f;m.factors)
+				ok|=rec(f,var,numBound);
+			return ok;
+		}
+		if(auto i=cast(DInt)expr) return rec(i.expr,var.incDeBruijnVar(1,0),numBound+1);
+		if(auto s=cast(DSum)expr) return rec(s.expr,var.incDeBruijnVar(1,0),numBound+1);
+		if(auto c=cast(DMCase)expr){
+			if(!rec(c.val,var.incDeBruijnVar(1,0),numBound+1)) return false;
+			return rec(c.err,var,numBound);
+		}
 		return false;
 	}
-	if(auto i=cast(DInt)expr) return isContinuousMeasureInAfterIntegration(i.expr,var.incDeBruijnVar(1,0),numBound+1);
-	if(auto s=cast(DSum)expr) return isContinuousMeasureInAfterIntegration(s.expr,var.incDeBruijnVar(1,0),numBound+1);
-	if(auto c=cast(DMCase)expr){
-		if(!isContinuousMeasureInAfterIntegration(c.val,var.incDeBruijnVar(1,0),numBound+1)) return false;
-		return isContinuousMeasureInAfterIntegration(c.err,var,numBound);
-	}
-	return false;
+	return rec(expr,var,numBound)&&!bad;
 }
 
 bool isContinuousMeasureIn(DExpr expr,DVar var){
@@ -3455,10 +3473,14 @@ class DDelta: DExpr{ // point mass
 		return null;
 	}
 	static DExpr staticSimplify(DExpr e,DExpr var,DExpr facts=one){
-		// cannot use all facts during simplification (e.g. see test/tuples5.psi)
-		// the problem is that there might be a relation between e.g. multiple tuple entries, and we are not
-		// allowed to introduce free variables from var into e, or remove free variables from var.
-		// TODO: filter more precisely
+		// cannot use all facts during simplification (e.g. see test/tuples3.psi, test/tuples5.psi)
+		// the problem is that it can introduce cyclic dependencies:
+		// [x=z]·δ(x)[y]·δ(y)[z] → [x=z]·δ(z)[y]·δ(y)[z]
+		// e.g., ∫dk[0≤k≤1]λ[k]δ(k,)[x]·δ(x@[0],)[y]·[-y@[0]+k=0] = 1
+		// TODO: is there a better way to handle this?
+		if(auto v=cast(DVar)var)
+			if(facts.substitute(v,e).simplify(one)==zero)
+				return zero;
 		auto ne=e.simplify(one), nvar=var.simplify(one);
 		if(ne != e || nvar != var) return dDelta(ne,nvar).simplify(facts);
 		if(auto fct=factorDIvr!(e=>dDelta(e,nvar))(ne)) return fct.simplify(facts);
