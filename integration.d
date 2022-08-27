@@ -511,7 +511,8 @@ Q!(SplitIvrsIntegral,DExpr[2]) splitIvrsIntegral(DExpr expr){
 				if(e != e.linearizeConstraints(var)) return false; // TODO: guarantee this condition
 				if(e.hasAny!DIvr) return false; // TODO: make sure this cannot actually happen
 				if(e.hasAny!DFloor||e.hasAny!DCeil) return false;
-				if(e.hasAny!DDistApply) return false; // TODO: some proofs still possible
+				if(e.hasAny!DDistApply) return false; // TODO: some proofs still possible (needed?)
+				if(e.hasAny!DDelta) return false; // TODO: probably not needed
 				return true;
 			}
 			if(mustHaveZerosOfMeasureZero()){
