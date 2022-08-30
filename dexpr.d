@@ -1402,11 +1402,18 @@ class DMult: DCommutAssocOp{
 		// TODO: this is a major bottleneck!
 		auto ne=basicSimplify();
 		if(ne != this) return ne.simplify(facts);
-		foreach(f;this.factors) if(auto d=cast(DDelta)f){ // TODO: do this in a nicer way
-			auto wo=this.withoutFactor(f);
-			auto var=cast(DVar)d.var;
-			if(var&&wo.hasFreeVar(var) && !d.e.hasFreeVar(var))
-				return (wo.substitute(var,d.e).simplify(facts.substitute(var,d.e).simplify(one))*d).simplify(facts);
+		SetX!DVar deltaOutputVars;
+		foreach(f;this.factors) if(auto d=cast(DDelta)f){
+			if(auto var=cast(DVar)d.var)
+				deltaOutputVars.insert(var);
+		}
+		foreach(f;this.factors) if(auto d=cast(DDelta)f){ // TODO: do this in a nicer way?
+			if(auto var=cast(DVar)d.var){
+				if(d.e.freeVars.any!(v=>v in deltaOutputVars)) continue;
+				auto wo=this.withoutFactor(f);
+				if(wo.hasFreeVar(var) && !d.e.hasFreeVar(var))
+					return (wo.substitute(var,d.e).simplify(facts.substitute(var,d.e).simplify(one))*d).simplify(facts);
+			}
 		}
 	Louter: foreach(f;this.factors) if(auto d=cast(DDeltaOld)f){
 			auto fact=dEqZ(d.var).simplify(facts);
