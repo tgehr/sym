@@ -2214,7 +2214,33 @@ Q!(bool,DExpr[3]) getBoundsForVar(alias boundLe=dLe)(DExpr ivrs,DVar var,DExpr f
 	auto lower=lowers.length?dMax(lowers).simplify(facts):null;
 	auto upper=uppers.length?dMin(uppers).simplify(facts):null;
 	auto lowLeUp=dMult(lowLeUps);
-	return q(true,cast(DExpr[3 ])[lower,upper,lowLeUp]);
+	return q(true,cast(DExpr[3])[lower,upper,lowLeUp]);
+}
+
+
+DExpr linearizeDDelta(DExpr e,DVar var){
+	auto lebesgue=dLebesgue(var);
+	if(!e.hasFactor(lebesgue)) return null;
+	DDelta[] candidates;
+	foreach(f;e.factors){
+		if(auto d=cast(DDelta)f){
+			if(d.var==var) return null;
+			if(d.e.hasFreeVar(var))
+				candidates~=d;
+		}
+	}
+	static int heuristic(DExpr e){ // TODO: better heuristic
+		int numFree=0;
+		foreach(v;e.freeVars)
+			++numFree;
+		return numFree;
+	}
+	schwartzSort!heuristic(candidates);
+	foreach(d;candidates){
+		if(auto linearized=linearizeConstraint!true(d,var))
+			return e.withoutFactor(d).withoutFactor(lebesgue)*linearized;
+	}
+	return null;
 }
 
 // attempt to produce an equivalent expression where 'var' does not occur non-linearly in constraints
@@ -2226,23 +2252,28 @@ DExpr linearizeConstraints(alias filter=e=>true)(DExpr e,DVar var){ // TODO: don
 		return dPlus(r);
 	}
 	if(auto m=cast(DMult)e){
+		if(auto delta=linearizeDDelta(e,var))
+			return linearizeConstraints!filter(delta,var);
 		DExprSet r;
 		foreach(f;m.factors) DMult.insert(r,linearizeConstraints!filter(f,var));
 		return dMult(r);
 	}
 	if(auto p=cast(DPow)e){
-		return linearizeConstraints(p.operands[0],var)^^linearizeConstraints!filter(p.operands[1],var);
+		return linearizeConstraints!filter(p.operands[0],var)^^linearizeConstraints!filter(p.operands[1],var);
 	}
 	if(auto ivr=cast(DIvr)e) if(filter(ivr)) return linearizeConstraint(ivr,var);
 	if(auto delta=cast(DDeltaOld)e) if(filter(delta)) return linearizeConstraint(delta,var);
 	return e; // TODO: enough?
 }
 
-DExpr linearizeConstraint(T)(T cond,DVar var) if(is(T==DIvr)||is(T==DDeltaOld))
+DExpr linearizeConstraint(bool nullOnFailure=false,T)(T cond,DVar var) if(is(T==DIvr)||is(T==DDeltaOld)||is(T==DDelta))
 in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,leZ));}do{
+	// for DIvr and DDeltaOld, this computes an expression equivalent to cond.
+	// for DDelta, this computes an expression equivalent to cond·λ[var].
 	alias Type=DIvr.Type;
 	alias eqZ=Type.eqZ, neqZ=Type.neqZ, leZ=Type.leZ, lZ=Type.lZ;
-	enum isDelta=is(T==DDeltaOld);
+	enum isOldDelta=is(T==DDeltaOld);
+	enum isDelta=isOldDelta||is(T==DDelta);
 	class Unwind:Exception{this(){super("");}} // TODO: get rid of this?
 	void unwind(){ throw new Unwind(); }
 	DExpr doIt(DExpr parity,Type ty,DExpr lhs,DExpr rhs){ // invariant: var does not occur in rhs or parity
@@ -2284,10 +2315,37 @@ in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,l
 		}else if(auto m=cast(DMult)lhs){
 			auto ow=splitMultAtVar(m,var);
 			if(!cast(DMult)ow[1]){
-				// TODO: make sure this is correct for deltas
-				// (this is what the case split code did)
-				static if(isDelta) auto rest=dDeltaOld(rhs);
-				else auto rest=dIvr(ty,-rhs);
+				static if(isDelta){
+					static if(!isOldDelta){
+						auto dvar=cast(DVar)cond.var;
+						if(!dvar) unwind();
+						auto zeros=dEqZ(rhs).simplify(one).linearizeConstraints(dvar).polyNormalize(dvar).simplify(one);
+						DExprSet special;
+						foreach(s;zeros.summands){ // TODO: this is very similar to logic for poles below, factor out?
+							DExpr summand=null;
+							if(s.hasFreeVar(dvar)) foreach(f;s.factors){
+								if(!f.hasFreeVar(dvar)) continue;
+								auto ivr=cast(DIvr)f;
+								if(ivr&&ivr.type == eqZ){
+									auto val=solveFor(ivr.e,dvar);
+									if(!val || ivr.substitute(dvar,val).simplify(one) != one)
+										continue; // TODO: get rid of this
+									summand=s*dDelta(val,dvar);
+									break;
+								}
+							}else summand=s; // TODO: is this necessary?
+							if(summand is null) unwind();
+							DPlus.insert(special,summand);
+						}
+						auto rest=dPlus(special);
+						assert(!rest.hasFreeVar(var));
+						rest=rest*dLebesgue(var);
+					}else{
+						// TODO: make sure this is correct
+						// (this is what the case split code did)
+						auto rest=dDeltaOld(rhs);
+					}
+				}else auto rest=dIvr(ty,-rhs);
 				return dIvr(eqZ,ow[0])*rest+dIvr(neqZ,ow[0])*doIt(parity*ow[0],ty,ow[1],rhs/ow[0]);
 			} // TODO: what if ow[1] is a product?
 		}else if(auto p=cast(DPow)lhs){
@@ -2383,7 +2441,9 @@ in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,l
 		}
 		static if(isDelta){
 			if(lhs != var) unwind(); // TODO: get rid of this?
-			auto diff=dAbs(dDiff(var,cond.var)).simplify(one);
+			static if(isOldDelta) auto e=cond.var;
+			else auto e=cond.e;
+			auto diff=dAbs(dDiff(var,e)).simplify(one);
 			auto pole=dIvr(eqZ,diff).simplify(one).linearizeConstraints(var).polyNormalize(var).simplify(one);
 			DExprSet special;
 			foreach(s;pole.summands){
@@ -2402,16 +2462,25 @@ in{static if(is(T==DIvr)) with(DIvr.Type) assert(util.among(cond.type,eqZ,neqZ,l
 				if(summand is null) unwind();
 				DPlus.insert(special,summand);
 			}
-			return dIvr(neqZ,diff).linearizeConstraints(var)*dDeltaOld(lhs-rhs)/diff+dPlus(special);
+			static if(isOldDelta){
+				auto deltaFactor=dDeltaOld(lhs-rhs)/diff;
+				auto specialSum=dPlus(special);
+			}else{
+				assert(lhs==var);
+				auto deltaFactor=dDelta(rhs,var)/diff*dLebesgue(cond.var);
+				auto specialSum=dPlus(special)*dLebesgue(var);
+			}
+			return dIvr(neqZ,diff).linearizeConstraints(var)*deltaFactor+specialSum;
 		}
 		else return dIvr(ty,lhs-rhs);
 	}
 	static if(isDelta) auto ty=eqZ;
 	else auto ty=cond.type;
-	static if(isDelta) auto e=cond.var;
-	else auto e=cond.e;
-	try return doIt(one,ty,e.polyNormalize(var),zero);
-	catch(Unwind) return cond;
+	static if(isOldDelta) auto e=cond.var, rhs=zero;
+	else static if(isDelta) auto e=cond.e, rhs=cond.var;
+	else auto e=cond.e, rhs=zero;
+	try return doIt(one,ty,e.polyNormalize(var),rhs);
+	catch(Unwind) return nullOnFailure?null:isDelta&&!isOldDelta?cond*dLebesgue(var):cond;
 }
 
 struct SolutionInfo{
@@ -2557,10 +2626,16 @@ struct DExprHoles(T){
 	Hole[] holes; // TODO: avoid allocation if only a few holes
 }
 
-DExprHoles!T getHoles(alias filter,T=DExpr)(DExpr e){
+enum HoleFilter{
+	any,
+	dIvr,
+}
+
+DExprHoles!T getHoles(alias filter,T=DExpr,HoleFilter holeFilter=HoleFilter.any)(DExpr e){
 	DExprHoles!T r;
 	DExpr doIt(DExpr e){
 		// TODO: add a general visitor with rewrite capabilities
+		// TODO: this is incomplete, do we need more?
 		if(auto expr=filter(e)){
 			auto var=dVar("(hole)"~to!string(r.holes.length));
 			r.holes~=DExprHoles!T.Hole(var,expr);
@@ -2584,60 +2659,70 @@ DExprHoles!T getHoles(alias filter,T=DExpr)(DExpr e){
 			return dGaussIntInv(doIt(gi.x));
 		if(auto lg=cast(DLog)e)
 			return dLog(doIt(lg.e));
+		static if(holeFilter!=HoleFilter.dIvr){
+			if(auto lb=cast(DLebesgue)e)
+				return dLebesgue(doIt(lb.var));
+		}
 		if(auto dl=cast(DDeltaOld)e)
 			return dDeltaOld(doIt(dl.var));
 		if(auto dl=cast(DDelta)e)
 			return dDelta(doIt(dl.e),doIt(dl.var));
 		if(auto ivr=cast(DIvr)e)
 			return dIvr(ivr.type,doIt(ivr.e));
-		/+if(auto sn=cast(DSin)e)
-			return dSin(doIt(sn.e));
-		if(auto fl=cast(DFloor)e)
-			return dFloor(doIt(fl.e));
-		if(auto cl=cast(DCeil)e)
-			return dCeil(doIt(cl.e));
-		if(auto bo=cast(DBitOr)e){
-			DExprSet r;
-			foreach(f;bo.operands) DBitOr.insert(r,doIt(f));
-			return dBitOr(r);
+		static if(holeFilter!=HoleFilter.dIvr){
+			if(auto sn=cast(DSin)e)
+				return dSin(doIt(sn.e));
+			if(auto fl=cast(DFloor)e)
+				return dFloor(doIt(fl.e));
+			if(auto cl=cast(DCeil)e)
+				return dCeil(doIt(cl.e));
+			if(auto bo=cast(DBitOr)e){
+				DExprSet r;
+				foreach(f;bo.operands) DBitOr.insert(r,doIt(f));
+				return dBitOr(r);
+			}
+			if(auto bx=cast(DBitXor)e){
+				DExprSet r;
+				foreach(f;bx.operands) DBitXor.insert(r,doIt(f));
+				return dBitXor(r);
+			}
+			if(auto ba=cast(DBitAnd)e){
+				DExprSet r;
+				foreach(f;ba.operands) DBitAnd.insert(r,doIt(f));
+				return dBitAnd(r);
+			}
 		}
-		if(auto bx=cast(DBitXor)e){
-			DExprSet r;
-			foreach(f;bx.operands) DBitXor.insert(r,doIt(f));
-			return dBitXor(r);
-		}
-		if(auto ba=cast(DBitAnd)e){
-			DExprSet r;
-			foreach(f;ba.operands) DBitAnd.insert(r,doIt(f));
-			return dBitAnd(r);
-		}+/
 		if(auto tpl=cast(DTuple)e)
 			return dTuple(tpl.values.map!doIt.array);
-		/+if(auto rcd=cast(DRecord)e){
-			DExpr[string] nvalues;
-			foreach(k,v;rcd.values) nvalues[k]=doIt(v);
-			return dRecord(nvalues);
+		static if(holeFilter!=HoleFilter.dIvr){
+			if(auto rcd=cast(DRecord)e){
+				DExpr[string] nvalues;
+				foreach(k,v;rcd.values) nvalues[k]=doIt(v);
+				return dRecord(nvalues);
+			}
+			if(auto ab=cast(DAbs)e)
+				return dAbs(doIt(ab.e));
+			if(auto idx=cast(DIndex)e)
+				return dIndex(doIt(idx.e),doIt(idx.i));
+			if(auto iu=cast(DIUpdate)e)
+				return dIUpdate(doIt(iu.e),doIt(iu.i),doIt(iu.n));
+			if(auto slc=cast(DSlice)e)
+				return dSlice(doIt(slc.e),doIt(slc.l),doIt(slc.r));
+			if(auto ru=cast(DRUpdate)e)
+				return dRUpdate(doIt(ru.e),ru.f,doIt(ru.n));
+			if(auto fld=cast(DField)e)
+				return dField(doIt(fld.e),fld.f);
 		}
-		if(auto ab=cast(DAbs)e)
-			return dAbs(doIt(ab.e));
-		if(auto idx=cast(DIndex)e)
-			return dIndex(doIt(idx.e),doIt(idx.i));
-		if(auto iu=cast(DIUpdate)e)
-			return dIUpdate(doIt(iu.e),doIt(iu.i),doIt(iu.n));
-		if(auto slc=cast(DSlice)e)
-			return dSlice(doIt(e.e),doIt(e.l),doIt(e.r));
-		if(auto ru=cast(DRUpdate)e)
-			return dRUpdate(doIt(e.e),e.f,doIt(e.n));
-		if(auto fld=cast(DField)e)
-			return dField(doIt(fld.e),fld.f);+/
 		if(auto val=cast(DVal)e)
 			return dVal(doIt(val.e));
-		/+if(auto ap=cast(DApply)e)
-			return dApply(doIt(ap.fun),doIt(ap.arg));
-		if(auto ar=cast(DArray)e)
-			return dArray(doIt(ar.length),ar.entries);
-		if(auto ce=cast(DCat)e)
-		    return dCat(operands.map!doIt.array)+/
+		static if(holeFilter!=HoleFilter.dIvr){
+			if(auto ap=cast(DApply)e)
+				return dApply(doIt(ap.fun),doIt(ap.arg));
+			if(auto ar=cast(DArray)e)
+				return dArray(doIt(ar.length),ar.entries); // TODO: recurse into array
+			if(auto ce=cast(DCat)e)
+				return dCat(ce.operands.map!doIt.array);
+		}
 		return e;
 	}
 	r.expr=doIt(e);
@@ -2659,7 +2744,7 @@ DExpr factorDIvr(alias wrap)(DExpr e){
 	if(!e.hasAny!DIvr(false)) return null;
 	if(auto ivr=cast(DIvr)e) return ivr*wrap(one)+negateDIvr(ivr)*wrap(zero);
 	if(e.factors.all!(x=>!!cast(DIvr)x)) return factorDIvrProduct!wrap(e);
-	auto h=getHoles!(x=>x.factors.any!(y=>!!cast(DIvr)y)?x:null)(e);
+	auto h=getHoles!(x=>x.factors.any!(y=>!!cast(DIvr)y)?x:null,DExpr,HoleFilter.dIvr)(e);
 	if(!h.holes.length) return null;
 	DExpr doIt(DExpr facts,DExpr cur,size_t i){
 		facts=facts.simplify(one);
