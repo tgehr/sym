@@ -3223,7 +3223,8 @@ class DIvr: DExpr{ // iverson brackets
 			auto numden=e.splitCommonDenominator();
 			numden[0]=numden[0].simplify(facts);
 			numden[1]=numden[1].simplify(facts);
-			if(auto var=e.getCanonicalFreeVar()){
+			// TODO: allow specifying canonical free vars for simplification?
+			if(auto var=e.getUniqueFreeVar()){
 				if(auto poly=numden[0].asPolynomialIn(var,2)){
 					auto pc=poly.coefficients;
 					auto a=pc.get(2,zero),b=pc.get(1,zero),c=pc.get(0,zero);
@@ -3275,6 +3276,14 @@ DVar getCanonicalVar(T)(T vars){
 
 DVar getCanonicalFreeVar(DExpr e){
 	return getCanonicalVar(e.freeVars);
+}
+DVar getUniqueFreeVar(DExpr e){
+	DVar r=null;
+	foreach(var;e.freeVars){
+		if(r !is null) return null;
+		r=var;
+	}
+	return r;
 }
 
 bool isNumericalConstant(DExpr expr){ // TODO: add types to subexpressions?
