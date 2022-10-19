@@ -417,8 +417,9 @@ mixin template FactoryFunction(T){
 		DExpr dIntSmp(DVar var,DExpr expr,DExpr facts){
 			return dInt(var,expr).simplify(facts);
 		}
-		DExpr dInt(DVar var,DExpr expr)in{assert(var&&expr&&!cast(DDeBruijnVar)var);}do{
-			return dInt(expr.incDeBruijnVar(1,0).substitute(var,db1));
+		DExpr dInt(DVar var,DExpr expr)in{assert(var&&expr);}do{
+			if(var==db1) return dInt(expr);
+			return dInt(expr.incDeBruijnVar(1,0).substitute(var.incDeBruijnVar(1,0),db1));
 		}
 	}else static if(is(T==DSum)){
 		@disable DExpr dSumSmp(DVar var,DExpr expr);
@@ -428,8 +429,9 @@ mixin template FactoryFunction(T){
 		DExpr dSumSmp(DVar var,DExpr expr,DExpr facts){
 			return dSum(var,expr).simplify(facts);
 		}
-		DExpr dSum(DVar var,DExpr expr)in{assert(var&&expr&&!cast(DDeBruijnVar)var);}do{
-			return dSum(expr.incDeBruijnVar(1,0).substitute(var,db1));
+		DExpr dSum(DVar var,DExpr expr)in{assert(var&&expr);}do{
+			if(var==db1) return dSum(expr);
+			return dSum(expr.incDeBruijnVar(1,0).substitute(var.incDeBruijnVar(1,0),db1));
 		}
 	}else static if(is(T==DLim)){
 		@disable DExpr dLimSmp(DVar var,DExpr e,DExpr x);
@@ -439,14 +441,14 @@ mixin template FactoryFunction(T){
 		DExpr dLimSmp(DVar v,DExpr e,DExpr x,DExpr facts){
 			return dLim(v,e,x).simplify(facts);
 		}
-		DExpr dLim(DVar v,DExpr e,DExpr x)in{assert(v&&e&&x&&(!cast(DDeBruijnVar)v||v==db1));}do{
+		DExpr dLim(DVar v,DExpr e,DExpr x)in{assert(v&&e&&x);}do{
 			if(v==db1) return dLim(e,x.incDeBruijnVar(1,1));
-			return dLim(e,x.incDeBruijnVar(1,0).substitute(v,db1));
+			return dLim(e,x.incDeBruijnVar(1,0).substitute(v.incDeBruijnVar(1,0),db1));
 		}
 	}else static if(is(T==DDiff)){
-		DExpr dDiff(DVar v,DExpr e,DExpr x)in{assert(v&&e&&x&&(!cast(DDeBruijnVar)v||v==db1));}do{
+		DExpr dDiff(DVar v,DExpr e,DExpr x)in{assert(v&&e&&x);}do{
 			if(v==db1) return dDiff(e.incDeBruijnVar(1,1),x);
-			return dDiff(e.incDeBruijnVar(1,0).substitute(v,db1),x);
+			return dDiff(e.incDeBruijnVar(1,0).substitute(v.incDeBruijnVar(1,0),db1),x);
 		}
 		DExpr dDiff(DVar v,DExpr e){ return dDiff(v,e,v); }
 	}else static if(is(T==DLambda)){
@@ -461,9 +463,9 @@ mixin template FactoryFunction(T){
 			assert(!!cast(DLambda)r);
 			return cast(DLambda)cast(void*)r;
 		}
-		DLambda dLambda(DVar var,DExpr expr)in{assert(var&&expr&&(!cast(DDeBruijnVar)var||var==db1));}do{
+		DLambda dLambda(DVar var,DExpr expr)in{assert(var&&expr);}do{
 			if(var==db1) return dLambda(expr);
-			return dLambda(expr.incDeBruijnVar(1,0).substitute(var,db1));
+			return dLambda(expr.incDeBruijnVar(1,0).substitute(var.incDeBruijnVar(1,0),db1));
 		}
 	}else static if(is(T==DDistLambda)){
 		@disable DExpr dDistLambdaSmp(DVar var,DExpr expr);
@@ -477,9 +479,9 @@ mixin template FactoryFunction(T){
 			assert(!!cast(DDistLambda)r);
 			return cast(DDistLambda)cast(void*)r;
 		}
-		DDistLambda dDistLambda(DVar var,DExpr expr)in{assert(var&&expr&&(!cast(DDeBruijnVar)var||var==db1));}do{
+		DDistLambda dDistLambda(DVar var,DExpr expr)in{assert(var&&expr);}do{
 			if(var==db1) return dDistLambda(expr);
-			return dDistLambda(expr.incDeBruijnVar(1,0).substitute(var,db1));
+			return dDistLambda(expr.incDeBruijnVar(1,0).substitute(var.incDeBruijnVar(1,0),db1));
 		}
 	}else static if(is(T==DRecord)){
 		auto dRecord(){ return dRecord((DExpr[string]).init); }
@@ -1411,6 +1413,7 @@ class DMult: DCommutAssocOp{
 			if(auto var=cast(DVar)d.var){
 				if(d.e.freeVars.any!(v=>v in deltaOutputVars)) continue;
 				auto wo=this.withoutFactor(f);
+				if(wo.isMeasureIn(var)) continue;
 				if(wo.hasFreeVar(var) && !d.e.hasFreeVar(var))
 					return (wo.substitute(var,d.e).simplify(facts.substitute(var,d.e).simplify(one))*d).simplify(facts);
 			}
@@ -2239,6 +2242,33 @@ DExpr linearizeDDelta(DExpr e,DVar var){
 	foreach(d;candidates){
 		if(auto linearized=linearizeConstraint!true(d,var))
 			return e.withoutFactor(d).withoutFactor(lebesgue)*linearized;
+	}
+	return null;
+}
+
+DExpr linearizeDLebesgue(DExpr e,DVar var){
+	if(e.hasFactor(dLebesgue(var))) return null;
+	DDelta[] candidates;
+	foreach(f;e.factors){
+		if(auto d=cast(DDelta)f){
+			if(d.var==var) candidates~=d;
+		}
+	}
+	static int heuristic(DExpr e){ // TODO: better heuristic
+		int numFree=0;
+		foreach(v;e.freeVars)
+			++numFree;
+		return numFree;
+	}
+	schwartzSort!heuristic(candidates);
+	foreach(d;candidates){
+		foreach(v;d.e.freeVars){
+			auto lebesgue=dLebesgue(v);
+			if(e.hasFactor(lebesgue)){
+				if(auto linearized=linearizeConstraint!true(d,v))
+					return e.withoutFactor(d).withoutFactor(lebesgue)*linearized;
+			}
+		}
 	}
 	return null;
 }
@@ -3294,6 +3324,8 @@ bool isNumericalConstant(DExpr expr){ // TODO: add types to subexpressions?
 	return false;
 }
 
+
+// TODO: get rid of code duplication below
 bool isRealNumber(DExpr expr,int numBound){ // (expr should be a factor of a distribution term)
 	if(isNumericalConstant(expr)) return true;
 	if(!expr.hasFreeVars()) return true;
@@ -3329,7 +3361,6 @@ bool isRealNumber(DExpr expr,int numBound){ // (expr should be a factor of a dis
 		return isRealNumber(c.err,numBound);
 	}
 	return false;
-
 }
 
 DExpr withoutLebesgue(DExpr expr,int numBound){
@@ -3448,6 +3479,75 @@ bool isContinuousMeasure(DExpr expr){
 	return isContinuousMeasureAfterIntegration(expr,0);
 }
 
+bool isMeasureAfterIntegration(DExpr expr,int numBound){ // TODO: get rid of code duplication
+	bool bad=false;
+	bool rec(DExpr expr,int numBound){
+		if(bad) return false;
+		if(auto d=cast(DLebesgue)expr){
+			if(auto v=cast(DDeBruijnVar)d.var){
+				if(v.i<=numBound)
+					return false;
+			}
+			return true;
+		}
+		if(auto d=cast(DDelta)expr){
+			if(auto v=cast(DDeBruijnVar)d.var){
+				if(v.i<=numBound)
+					return false;
+			}
+			return true;
+		}
+		if(auto d=cast(DDistApply)expr){
+			if(auto v=cast(DDeBruijnVar)d.arg){
+				if(v.i<=numBound)
+					return false;
+			}
+			return true;
+		}
+		if(auto d=cast(DDeltaOld)expr){
+			foreach(fv;d.var.freeVars){
+				if(auto v=cast(DDeBruijnVar)fv){
+					if(v.i<=numBound)
+						return false;
+				}
+			}
+			return true;
+		}
+		if(auto p=cast(DPlus)expr){
+			bool ok=false;
+			foreach(s;p.summands){
+				ok|=rec(s,numBound);
+				if(bad) return false;
+			}
+			return ok;
+		}
+		if(auto m=cast(DMult)expr){
+			bool ok=false;
+			foreach(s;m.factors){
+				ok|=rec(s,numBound);
+				if(bad) return false;
+			}
+			return ok;
+		}
+		if(auto i=cast(DInt)expr) return rec(i.expr,numBound+1);
+		if(auto s=cast(DSum)expr) return rec(s.expr,numBound+1);
+		if(auto c=cast(DMCase)expr){
+			if(!rec(c.val,numBound+1)) return false;
+			if(bad) return false;
+			if(!rec(c.err,numBound)) return false;
+			if(bad) return false;
+			return true;
+		}
+		return false;
+	}
+	return rec(expr,numBound)&&!bad;
+}
+
+bool isMeasure(DExpr expr){
+	return isMeasureAfterIntegration(expr,0);
+}
+
+
 bool isContinuousMeasureInAfterIntegration(DExpr expr,DVar var,int numBound){ // TODO: get rid of code duplication.
 	bool bad=false;
 	bool rec(DExpr expr,DVar var,int numBound){
@@ -3487,6 +3587,66 @@ bool isContinuousMeasureInAfterIntegration(DExpr expr,DVar var,int numBound){ //
 
 bool isContinuousMeasureIn(DExpr expr,DVar var){
 	return isContinuousMeasureInAfterIntegration(expr,var,0);
+}
+
+bool isMeasureInAfterIntegration(DExpr expr,DVar var,int numBound){ // TODO: get rid of code duplication.
+	bool bad=false;
+	bool rec(DExpr expr,DVar var,int numBound){
+		if(bad) return false;
+		if(auto d=cast(DLebesgue)expr){
+			if(auto v=cast(DDeBruijnVar)d.var){
+				if(v.i<=numBound)
+					return false;
+			}
+			return d.var==var;
+		}
+		if(auto d=cast(DDelta)expr){
+			if(auto v=cast(DDeBruijnVar)d.var){
+				if(v.i<=numBound)
+					return false;
+			}
+			return d.var==var;
+		}
+		if(auto d=cast(DDistApply)expr){
+			if(auto v=cast(DDeBruijnVar)d.arg){
+				if(v.i<=numBound)
+					return false;
+			}
+			return d.arg==var;
+		}
+		if(auto d=cast(DDeltaOld)expr){
+			foreach(fv;d.var.freeVars){
+				if(auto v=cast(DDeBruijnVar)fv){
+					if(v.i<=numBound)
+						return false;
+				}
+			}
+			return d.var.hasFreeVar(var);
+		}
+		if(auto p=cast(DPlus)expr){
+			bool ok=true;
+			foreach(s;p.summands)
+				ok&=rec(s,var,numBound);
+			return ok;
+		}
+		if(auto m=cast(DMult)expr){
+			bool ok=false;
+			foreach(f;m.factors)
+				ok|=rec(f,var,numBound);
+			return ok;
+		}
+		if(auto i=cast(DInt)expr) return rec(i.expr,var.incDeBruijnVar(1,0),numBound+1);
+		if(auto s=cast(DSum)expr) return rec(s.expr,var.incDeBruijnVar(1,0),numBound+1);
+		if(auto c=cast(DMCase)expr){
+			if(!rec(c.val,var.incDeBruijnVar(1,0),numBound+1)) return false;
+			return rec(c.err,var,numBound);
+		}
+		return false;
+	}
+	return rec(expr,var,numBound)&&!bad;
+}
+bool isMeasureIn(DExpr expr,DVar var){
+	return isMeasureInAfterIntegration(expr,var,0);
 }
 
 class DDeltaOld: DExpr{ // Dirac delta, for ℝ
@@ -3639,6 +3799,35 @@ class DLebesgue: DExpr{ // lebesgue measure
 }
 mixin FactoryFunction!DLebesgue;
 
+class DDisintegrate: DBinaryOp{ // disintegration
+	override @property string symbol(Format formatting,int binders){
+		return "//";
+	}
+	override @property Precedence precedence(){ return Precedence.div; }
+	static DExpr constructHook(DExpr[2] operands){
+		return null;
+	}
+	mixin Visitors;
+
+	static DExpr staticSimplify(DExpr a,DExpr b,DExpr facts=one){
+		auto na=a.simplify(facts), nb=b.simplify(facts);
+		if(na!=a||nb!=b) return dDisintegrate(na,nb).simplify(facts);
+		if(a.hasFactor(b)) return a.withoutFactor(b).simplify(facts);
+		if(auto l=cast(DLebesgue)b){
+			if(auto var=cast(DVar)l.var){
+				if(auto na2=linearizeDLebesgue(na,var)){
+					return dDisintegrate(na2,nb).simplify(facts);
+				}
+			}
+		}
+		return null;
+	}
+	override DExpr simplifyImpl(DExpr facts){
+		auto r=staticSimplify(operands[0],operands[1],facts);
+		return r?r:this;
+	}
+}
+mixin FactoryFunction!DDisintegrate;
 
 DExpr[2] splitPlusAtVar(DExpr e,DVar var){
 	DExprSet outside, within;
