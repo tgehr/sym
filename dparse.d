@@ -571,9 +571,13 @@ struct DParser{
 			if(isMultChar(cur())){
 				next();
 				f=f*parseJMult();
-			}else{
+			}else if(!code.startsWith("//")){
 				next();
 				f=f/parseJMult();
+			}else{
+				next();
+				next();
+				f=dDisintegrate(f,parseJMult());
 			}
 		}
 		return f;
