@@ -3,6 +3,7 @@
 
 module sym.integration;
 import options, sym.dexpr, util;
+import util.tuple:Q=Tuple,q=tuple;
 import std.conv;
 
 

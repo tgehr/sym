@@ -7,7 +7,7 @@ module sym.dexpr;
 import std.conv;
 import options, util.hashtable, util;
 
-alias Q=TupleX, q=tuplex;
+import util.tuple: Q=Tuple, q=tuple;
 static import std.typecons;
 
 import std.algorithm, std.array;
@@ -517,8 +517,8 @@ mixin template FactoryFunction(T){
 			static if(__traits(hasMember,T,"constructHook"))
 				if(auto r=T.constructHook(args)) return r;
 			static if(is(T==DFloat)) if(args[0]==0) return zero;
-			static MapX!(TupleX!(typeof(T.subExprs)),T) cache;
-			auto t=tuplex(args);
+			static MapX!(Q!(typeof(T.subExprs)),T) cache;
+			auto t=q(args);
 			if(t in cache) return cache[t];
 			auto r=new T(args);
 			cache[t]=r;
@@ -1099,10 +1099,10 @@ class DPlus: DCommutAssocOp{
 	override DExpr simplifyImpl(DExpr facts){
 		/+// static int i; if(++i>20000) dw(this," ",facts); // for debugging perforation bug.
 		//static int i=0; if(++i>1000) dw(this,facts); scope(exit) --i;
-		static bool[TupleX!(DExpr,DExpr)] has;
-		scope(exit) has.remove(tuplex(cast(DExpr)this,facts));
-		if(tuplex(cast(DExpr)this,facts) in has){ writeln("!"); return this; }
-		has[tuplex(cast(DExpr)this,facts)]=true;+/
+		static bool[Q!(DExpr,DExpr)] has;
+		scope(exit) has.remove(q(cast(DExpr)this,facts));
+		if(q(cast(DExpr)this,facts) in has){ writeln("!"); return this; }
+		has[q(cast(DExpr)this,facts)]=true;+/
 		DExprSet summands;
 		foreach(s;this.summands)
 			insertAndSimplify(summands,s,facts);

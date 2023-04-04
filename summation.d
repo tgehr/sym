@@ -5,6 +5,7 @@ module sym.summation;
 import std.algorithm;
 
 import sym.dexpr, util;
+import util.tuple:Q=Tuple,q=tuple;
 
 DExpr computeSum(DExpr expr,DExpr facts=one){
 	auto var=db1;
