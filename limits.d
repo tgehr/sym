@@ -74,10 +74,11 @@ auto expandFlatMap(alias a)(Case!ExpLim[][] r){
 DExpr getLimit(DVar v,DExpr e,DExpr x,DExpr facts=one)in{assert(isInfinite(e));}do{ // TODO: handle iverson brackets in some way
 	e=e.simplify(facts);
 	x=x.simplify(facts);
-	Case!ExpLim[] doIt(DVar v,DExpr e,DExpr x){
+	Case!ExpLim[] doIt(DVar v,DExpr e,DExpr x,bool normalize=true){
 		if(!x.hasFreeVar(v)) return [Case!ExpLim(one,ExpLim(x,x))];
 		if(x == v) return [Case!ExpLim(one,ExpLim(x,e))];
-		x=x.polyNormalize(v).simplify(facts);
+		if(normalize) x=x.polyNormalize(v).simplify(facts);
+		else x=x.simplify(facts);
 		if(auto p=cast(DPlus)x){
 			DExpr handlePlusImpl(ExpLim[] c){
 				bool simplified=false;
@@ -111,13 +112,33 @@ DExpr getLimit(DVar v,DExpr e,DExpr x,DExpr facts=one)in{assert(isInfinite(e));}
 				return null;
 			}
 			ExpLim handlePlus(ExpLim[] c){ return ExpLim(p,handlePlusImpl(c)); }
-			Case!ExpLim[][] r;
-			foreach(s;p.summands){
-				auto cur=doIt(v,e,s);
-				if(!cur.length) return [];
-				r~=cur;
+			Case!ExpLim[] handleSummands(T)(T summands,bool normalize=true){
+				Case!ExpLim[][] r;
+				foreach(s;summands){
+					auto cur=doIt(v,e,s,normalize);
+					if(!cur.length) return [];
+					r~=cur;
+				}
+				return expandMap!handlePlus(r);
 			}
-			return expandMap!handlePlus(r);
+			auto cand=handleSummands(p.summands);
+			if(cand.length&&cand.all!(c=>c.condition==zero || c.expression.limit))
+				return cand;
+			MapX!(DExpr,DExprSet) poly;
+			foreach(s;p.summands){
+				DExpr polyFact=s.getPolynomialFactor(v),rest;
+				if(polyFact) rest=s.withoutFactor(polyFact);
+				else{ rest=s; polyFact=one; }
+				auto ow=splitMultAtVar(rest,v);
+				polyFact=ow[0]*polyFact;
+				rest=ow[1];
+				if(rest in poly) DPlus.insert(poly[rest],polyFact);
+				else poly[rest]=singleton(polyFact);
+			}
+			DExprSet summands;
+			foreach(rest,polySummands;poly)
+				DPlus.insert(summands,rest*dPlus(polySummands).simplify(one));
+			return handleSummands(summands,false);
 		}
 		if(auto m=cast(DMult)x){
 			Case!ExpLim[][] r;

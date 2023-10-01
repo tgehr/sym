@@ -1861,6 +1861,20 @@ DExpr[2] asLinearFunctionIn(DExpr e,DVar v){ // returns [b,a] if e=av+b
 	return [p.coefficients.get(0,zero),p.coefficients.get(1,zero)];
 }
 
+DExpr getPolynomialFactor(DExpr e,DVar var){
+	DExpr polyFact=null;
+	foreach(f;e.factors){
+		if(auto p=cast(DPow)f){
+			if(p.operands[0] == var){
+				if(auto c=p.operands[1].isInteger()){
+					if(c.c>0){ polyFact=p; break; }
+				}
+			}
+		}
+		if(f == var){ polyFact=f; break; }
+	}
+	return polyFact;
+}
 
 abstract class DUnaryOp: DOp{
 	DExpr operand;

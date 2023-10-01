@@ -428,17 +428,7 @@ DExpr tryGetAntiderivative(DExpr expr){
 		}
 		auto m=cast(DMult)e;
 		if(!m) return fail();
-		DExpr polyFact=null;
-		foreach(f;m.factors){
-			if(auto p=cast(DPow)f){
-				if(p.operands[0] == var){
-					if(auto c=p.operands[1].isInteger()){
-						if(c.c>0){ polyFact=p; break; }
-					}
-				}
-			}
-			if(f == var){ polyFact=f; break; }
-		}
+		auto polyFact=m.getPolynomialFactor(var);
 		if(!polyFact) return fail();
 		auto rest=m.withoutFactor(polyFact);
 		auto intRest=tryGetAntiderivative(rest);
