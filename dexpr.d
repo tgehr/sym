@@ -661,13 +661,15 @@ class Dℚ: DExpr{
 	override string toStringImpl(Format formatting,Precedence prec,int binders){
 		string r;
 		if(c.den==1){
-			r=text(c.num);
+			r=text(c.num,".");
 		}else{
-			if(formatting==Format.matlab)
+			if(formatting==Format.matlab||formatting==Format.gnuplot)
 				r=text(c.num,"./",c.den);
 			else if(formatting==Format.lisp){
 				return text("(/ ",c.num," ",c.den,")");
-			}else r=text(c.num,"/",c.den);
+			}else{
+				r=text(c.num,"/",c.den);
+			}
 		}
 		if(formatting==Format.maple && c<0){
 			r="("~r~")";
@@ -740,8 +742,8 @@ class DFloat: DExpr{
 	alias subExprs=Seq!c;
 	override string toStringImpl(Format formatting,Precedence prec,int binders){
 		import std.format;
-		string r=format("%.16e",c);
-		assert(all!(c=>'0'<=c&&c<='9'||c=='-'||c=='+'||c=='.'||c=='e')(r),r);
+		string r=format("%.16#e",c);
+		assert(all!(c=> '0'<=c&&c<='9'||c=='-'||c=='+'||c=='.'||c=='e')(r),r);
 		if(formatting==Format.mathematica){
 			if(r.canFind("e"))
 				r="("~r.replace("e","*10^")~")";
