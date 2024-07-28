@@ -8,6 +8,7 @@ import std.conv;
 import options, util.hashtable, util;
 
 import util.tuple: Q=Tuple, q=tuple;
+import util.io:writeln;
 static import std.typecons;
 
 import std.algorithm, std.array;
