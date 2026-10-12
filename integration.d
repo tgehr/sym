@@ -562,7 +562,7 @@ private DExpr tryIntegrateImpl(DExpr expr){
 		foreach(s;p.summands){
 			auto ow=s.splitMultAtVar(var);
 			ow[0]=ow[0].incDeBruijnVar(-1,0).simplify(one);
-			auto t=tryIntegrate(ow[1]);
+			auto t=tryIntegrate((ow[1]*ivrs).simplify(one));
 			if(t) DPlus.insert(works,ow[0]*t);
 			else DPlus.insert(doesNotWork,s);
 		}
